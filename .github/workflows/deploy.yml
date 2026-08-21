@@ -16,7 +16,7 @@ jobs:
       - run: npm install
       - run: npm run build
 
-      # 生成 wrangler.toml (从 Secrets)
+      # 仅生成必需的 wrangler.toml (D1 ID 从 Secrets 读取)
       - name: Generate wrangler.toml
         run: |
           cat > wrangler.toml << 'EOF'
