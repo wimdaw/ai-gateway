@@ -110,6 +110,40 @@ export async function testModelConnection(
   }
 }
 
+/**
+ * 多 Key 轮询测试模型连接。
+ * 依次尝试每个已启用 key；遇到限流(429)、鉴权失败(401/403) 或上游 5xx 时自动切换到下一个 key；
+ * 命中可用 key 立即返回成功。用于后台"测试模型"，避免单个 key 被限流时误报整个渠道不可用。
+ */
+export async function testModelConnectionRotating(
+  baseUrl: string,
+  keys: string[],
+  modelId: string,
+  apiType?: 'openai' | 'anthropic'
+): Promise<{ success: boolean; message: string; statusCode?: number; keyIndex?: number }> {
+  const list = (keys || []).filter((k) => k && k.trim())
+  if (list.length === 0) {
+    return { success: false, message: '该渠道未启用任何 API Key', statusCode: 0 }
+  }
+
+  let last: { success: boolean; message: string; statusCode?: number } | null = null
+  for (let i = 0; i < list.length; i++) {
+    const r = await testModelConnection(baseUrl, list[i], modelId, apiType)
+    if (r.success) {
+      return {
+        ...r,
+        keyIndex: i,
+        message: list.length > 1 ? `${r.message} (key #${i + 1}/${list.length})` : r.message,
+      }
+    }
+    last = r
+    const st = r.statusCode || 0
+    if (st === 429 || st === 401 || st === 403 || st >= 500) continue
+    break
+  }
+  return last || { success: false, message: '连接失败', statusCode: 0 }
+}
+
 /** 处理 /v1/chat/completions 等 API 转发 */
 export async function handleProxy(c: Context<{ Bindings: Env }>) {
   try {

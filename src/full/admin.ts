@@ -17,7 +17,7 @@ import {
   updateProxyKey,
   deleteProxyKey,
 } from './storage'
-import { testModelConnection } from './proxy'
+import { testModelConnectionRotating } from './proxy'
 import { fetchOpenCodeModels, isOpenCodeProvider, isFreeKeyProvider, resolveOpenCodeUrls, testOpenCodeModel } from './opencode'
 import { PROXY_KEY_PREFIX, EXPIRY_OPTIONS, OPENCODE_DEFAULT_URL } from './config'
 import type {
@@ -172,10 +172,10 @@ export async function handleTestModel(c: Context<{ Bindings: Env }>) {
   }
 
   const enabledKeys = provider.apiKeys.filter(k => k.enabled)
-  // 通用免 key 支持: opencode 用专用测试, 其余渠道空 key 则用空 Bearer 直连测试
+  // 通用免 key 支持: opencode 用专用测试, 其余渠道多 key 轮询测试(遇 429/401/403/5xx 自动换 key)
   const result = isOpenCodeProvider(provider.id)
     ? await testOpenCodeModel(provider.baseUrl, enabledKeys, modelId, resolveOpenCodeUrls(c.env, provider))
-    : await testModelConnection(provider.baseUrl, enabledKeys[0]?.key || '', modelId, provider.apiType)
+    : await testModelConnectionRotating(provider.baseUrl, enabledKeys.map(k => k.key), modelId, provider.apiType)
 
   return c.json<ApiResponse>({
     success: true,

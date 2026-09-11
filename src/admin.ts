@@ -11,7 +11,7 @@ import {
   deleteProxyKey,
   getUsageSummary,
 } from './storage'
-import { testModelConnection } from './proxy'
+import { testModelConnectionRotating } from './proxy'
 import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from './opencode'
 import { PROXY_KEY_PREFIX, EXPIRY_OPTIONS, OPENCODE_DEFAULT_URL } from './config'
 import type {
@@ -227,9 +227,10 @@ export async function handleTestModel(c: Context<{ Bindings: Env }>) {
   }
 
   const enabledKeys = provider.apiKeys.filter(k => k.enabled)
+  // 多 key 轮询测试：逐个 key 尝试，遇 429/401/403/5xx 自动切换下一个 key，避免误报限流
   const result = isOpenCodeProvider(provider.id)
     ? await testOpenCodeModel(provider.baseUrl, enabledKeys, modelId, resolveProviderMirrorUrls(c.env, provider))
-    : await testModelConnection(provider.baseUrl, enabledKeys[0]?.key || '', modelId, provider.apiType)
+    : await testModelConnectionRotating(provider.baseUrl, enabledKeys.map(k => k.key), modelId, provider.apiType)
 
   return c.json<ApiResponse>({
     success: true,
