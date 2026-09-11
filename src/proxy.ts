@@ -142,12 +142,15 @@ export async function testModelConnection(
       return { success: true, message: '连接成功', statusCode: response.status }
     }
 
-    let errorBody = ''
+    // fetch 响应体只能消费一次: 先读文本, 再尝试解析 JSON; 若先 json() 失败再 text() 会抛
+    // "Body has already been used" 从而掩盖真实状态码(如 429)
+    const rawBody = await response.text()
+    let errorBody = rawBody
     try {
-      const errorData = await response.json() as { error?: { message?: string } }
-      errorBody = errorData?.error?.message || JSON.stringify(errorData)
+      const errorData = JSON.parse(rawBody) as { error?: { message?: string }; message?: string }
+      errorBody = errorData?.error?.message || errorData?.message || rawBody
     } catch {
-      errorBody = await response.text()
+      // 非 JSON 响应, 直接使用原始文本
     }
 
     return {
