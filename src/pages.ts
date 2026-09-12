@@ -826,11 +826,18 @@ async function oauthChannel(id) {
         } catch (e) { toast('请求失败', 'error'); oaok.disabled = false }
       }
     } else {
-      // kimi / grok: 设备码流程，打开验证页后自动轮询
-      const target = d.data.verification_uri_complete || d.data.verification_uri
-      window.open(target, '_blank')
+      // 设备码流程：打开带 user_code 的完整授权链接（缺 user_code 参数时页面会报错），并自动轮询
+      const complete = d.data.verification_uri_complete
+        || (d.data.verification_uri ? d.data.verification_uri + '?user_code=' + encodeURIComponent(d.data.user_code || '') : '')
+      window.open(complete, '_blank')
       const pname = provider === 'kimi' ? 'Kimi' : provider === 'qwen' ? 'Qwen' : 'Grok'
-      showM('<h3><i class="fas fa-key c-p"></i> ' + pname + ' 设备码授权</h3><p class="form-helper" style="margin-bottom:8px">已在新窗口打开验证页面，请输入下面的验证码并确认授权。确认后本弹窗会自动完成（最长等待约 15 分钟）。</p><div class="fg"><label>验证码 User Code</label><input type="text" class="fx1" value="' + escapeHtml(d.data.user_code || '') + '" readonly onclick="this.select()"></div><div class="fg"><label>验证地址</label><input type="text" class="fx1" value="' + escapeHtml(d.data.verification_uri || '') + '" readonly onclick="this.select()"></div><div id="oadev" class="mu"><i class="fas fa-spinner fa-spin"></i> 等待授权确认...</div><div class="fa"><button class="btn btn-s" onclick="closeM()">取消</button></div>')
+      showM('<h3><i class="fas fa-key c-p"></i> ' + pname + ' 设备码授权</h3>'
+        + '<p class="form-helper" style="margin-bottom:8px">已尝试在新窗口打开授权页面（链接已自动带上验证码）。若浏览器拦截了弹窗，请点击下面的按钮打开——<b>必须使用带 user_code 的完整链接</b>，直接打开验证地址会提示「缺少 user_code 参数」。</p>'
+        + '<p style="margin:8px 0"><a class="btn btn-p" href="' + escapeHtml(complete) + '" target="_blank" rel="noreferrer"><i class="fas fa-external-link-alt" aria-hidden="true"></i> 打开授权页面</a></p>'
+        + '<div class="fg"><label>验证码 User Code（页面要求手动输入时使用）</label><input type="text" class="fx1" value="' + escapeHtml(d.data.user_code || '') + '" readonly onclick="this.select()"></div>'
+        + '<div class="fg"><label>完整授权链接（打不开时复制到浏览器）</label><input type="text" class="fx1" value="' + escapeHtml(complete) + '" readonly onclick="this.select()"></div>'
+        + '<div id="oadev" class="mu"><i class="fas fa-spinner fa-spin"></i> 等待授权确认...</div>'
+        + '<div class="fa"><button class="btn btn-s" onclick="closeM()">取消</button></div>')
       pollDeviceFlow(provider, d.data.state, id, tr)
     }
   } catch (e) {

@@ -175,10 +175,11 @@ scope `openid profile email model.completion`。上游为 OpenAI 兼容接口，
   弹窗自动轮询）→ refresh_token 自动填入 API Keys。
 - 上游不提供 `/v1/models`，点「获取模型列表」返回内置清单：`coder-model`、`qwen3-coder-plus`、
   `qwen3-coder-flash`、`vision-model`（也可自行填写）。
-- ⚠️ **实测状态（2026-09）**：`device/code` 端点仍能正常下发设备码，但 `oauth2/token` 端点
-  对换码/刷新请求一律返回 `405`（阿里云边缘页，官方 qwen-code 客户端同样如此），因此 Qwen 免费
-  OAuth 目前**无法完成授权**——这与社区反馈的「Qwen 免费额度已停止」一致。代码保留为正确实现，
-  待上游恢复即可使用；现阶段如需 Qwen，建议用「OpenAI 兼容」渠道 + DashScope API Key。
+- ⚠️ **实测状态（2026-09，含 Cloudflare 边缘出口复测）**：`device/code` 端点仍能正常下发设备码，
+  但 `oauth2/token` 端点对换码/刷新请求一律返回 `405`（本机国内网络与 Workers 国际出口 SEA 实测一致，
+  官方 qwen-code 客户端同样如此），因此 Qwen 免费 OAuth 目前**无法完成授权**——与社区反馈的
+  「Qwen 免费额度已停止」一致。chat.qwen.ai 网页端聊天免费额度与此 API OAuth 额度是两回事。
+  代码保留为正确实现，待上游恢复即可使用；现阶段如需 Qwen，建议用「OpenAI 兼容」渠道 + DashScope API Key。
 - 注：Qwen 的阿里云 WAF 会拦截**没有 User-Agent** 的请求，本模块所有 OAuth 请求均已带 UA。
 
 ## DeepSeek 反代（`deepseek` 渠道）
