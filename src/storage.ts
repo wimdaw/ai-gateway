@@ -1,6 +1,6 @@
 import { KV_KEYS } from './config'
 import type { Env, Provider, ProxyKey, Session } from './types'
-import { getKV, cleanupUsageRecords, addUsageRecordD1 } from './storage-adapter'
+import { getKV, addUsageRecordD1 } from './storage-adapter'
 
 // ===== 提供商 CRUD =====
 
@@ -234,9 +234,7 @@ export async function getUsageSummary(env: Env, days: number): Promise<UsageSumm
   if (env.DB) {
     return await getUsageSummaryD1(env.DB, days)
   }
-  // 回退 KV 实现：EdgeOne Blob 无 TTL 时顺带清理过期记录
-  await cleanupUsageRecords(env, USAGE_RETENTION_DAYS).catch(() => {})
-
+  // 回退 KV 实现：按前缀聚合（KV 记录带 TTL 自动过期）
   const prefixes: string[] = []
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(Date.now() - i * 86400000)

@@ -15,13 +15,18 @@ export interface Provider {
   name: string
   baseUrl: string
   apiType?: 'openai' | 'anthropic'
-  /** 渠道类型: openai | openai-video | agnes-video | azure-tts (参考 one-api-cf, 缺省 openai) */
+  /**
+   * 渠道类型: openai | openai-video | agnes-video | azure-tts | antigravity
+   *          | claude | codex | kimi | grok (OAuth 反代, 复刻 CLIProxyAPI, 缺省 openai)
+   */
   type?: string
   apiKeys: ApiKeyEntry[]
   models: Model[]
   enabled: boolean
   /** OpenCode 镜像地址列表(后台可配置, 为空时回退 OPENCODE_MIRRORS_URL 环境变量) */
   mirrorUrls?: string[]
+  /** GCP 项目 ID(仅 type=antigravity 使用; 一般留空由网关自动解析) */
+  project?: string
   /** Azure TTS 音色配置(仅 type=azure-tts 使用) */
   voice?: string
   rate?: string
@@ -108,6 +113,7 @@ export interface CreateProviderRequest {
   apiKeys?: Array<{ key: string; enabled: boolean }>
   models?: Array<{ id: string; enabled: boolean }> | string[]
   mirrorUrls?: string[] | string
+  project?: string
   voice?: string
   rate?: string
   volume?: string
@@ -123,6 +129,7 @@ export interface UpdateProviderRequest {
   apiKeys?: Array<{ key: string; enabled: boolean }>
   models?: Array<{ id: string; enabled: boolean }> | string[]
   mirrorUrls?: string[] | string
+  project?: string
   voice?: string
   rate?: string
   volume?: string

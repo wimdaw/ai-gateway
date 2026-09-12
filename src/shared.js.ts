@@ -40,12 +40,12 @@ function showResult(el, success, msg) {
 }
 
 // ── API 请求函数 ──
-async function testKeyConnection(url, apiType, key, providerId, mirrorUrls, freeOnly) {
+async function testKeyConnection(url, apiType, key, providerId, mirrorUrls, freeOnly, providerType, project) {
   try {
     var r = await fetch('/admin/api/test-key', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: url, apiKey: key, apiType: apiType, providerId: providerId, mirrorUrls: mirrorUrls || undefined, freeOnly: freeOnly || undefined })
+      body: JSON.stringify({ url: url, apiKey: key, apiType: apiType, providerId: providerId, mirrorUrls: mirrorUrls || undefined, freeOnly: freeOnly || undefined, providerType: providerType || undefined, project: project || undefined })
     })
     var d = await r.json()
     if (d.success && d.data) {
@@ -56,16 +56,16 @@ async function testKeyConnection(url, apiType, key, providerId, mirrorUrls, free
     return { success: false, status: 0, data: null }
   }
 }
-async function testModelConnection(url, apiType, key, modelId, providerId, mirrorUrls) {
+async function testModelConnection(url, apiType, key, modelId, providerId, mirrorUrls, providerType, project) {
   try {
     var r = await fetch('/admin/api/test-model', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: url, apiKey: key, apiType: apiType, model: modelId, providerId: providerId, mirrorUrls: mirrorUrls || undefined })
+      body: JSON.stringify({ url: url, apiKey: key, apiType: apiType, model: modelId, providerId: providerId, mirrorUrls: mirrorUrls || undefined, providerType: providerType || undefined, project: project || undefined })
     })
     var d = await r.json()
     if (d.success && d.data) {
-      return { success: d.data.success, status: d.data.statusCode }
+      return { success: d.data.success, status: d.data.statusCode, message: d.data.message }
     }
     return { success: false, status: 0 }
   } catch (e) {

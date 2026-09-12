@@ -3,12 +3,10 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "@edgeone/pages-blob": "^0.0.16",
     "hono": "^4.12.27"
   },
   "scripts": {
-    "build": "echo ok",
-    "build:edgeone": "node esbuild-edgeone.js"
+    "build": "echo ok"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260702.1",

@@ -378,6 +378,76 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
       return videoResp
     }
 
+    // ===== Antigravity 反代 (type = antigravity) =====
+    // Antigravity OAuth 走 cloudcode-pa v1internal，请求/响应与 Gemini 协议互转。
+    if (providerType === 'antigravity') {
+      const supported = ['chat/completions', 'completions', 'messages', 'responses', '']
+      if (!supported.includes(subPath)) {
+        return c.json({
+          error: { message: `antigravity 渠道暂不支持端点 /v1/${subPath}`, type: 'invalid_request_error' },
+        }, 400)
+      }
+      const { handleAntigravityRequest } = await import('./antigravity')
+      return handleAntigravityRequest({
+        env: c.env,
+        providerId,
+        modelId: modelConfig.id,
+        requestedModel: modelSafe,
+        body: body as Record<string, any>,
+        refreshTokens: enabledKeys.map((k) => k.key),
+        project: provider.project,
+        maskedToken,
+        startedAt,
+        waitUntil: (promise) => {
+          try { c.executionCtx?.waitUntil(promise) } catch { /* 无 executionCtx 的运行时忽略 */ }
+        },
+      })
+    }
+
+    // ===== OAuth 反代渠道 (type = claude / codex / kimi / grok，复刻 CLIProxyAPI) =====
+    if (providerType === 'claude' || providerType === 'codex' || providerType === 'kimi' || providerType === 'grok') {
+      const supported = providerType === 'claude'
+        ? ['chat/completions', 'messages']
+        : providerType === 'kimi'
+          ? ['chat/completions']
+          : ['chat/completions', 'responses']
+      if (!supported.includes(subPath)) {
+        return c.json({
+          error: { message: `${providerType} 渠道暂不支持端点 /v1/${subPath}（支持: ${supported.map((s) => `/v1/${s}`).join('、')}）`, type: 'invalid_request_error' },
+        }, 400)
+      }
+      const oauthParams = {
+        env: c.env,
+        providerId,
+        modelId: modelConfig.id,
+        requestedModel: modelSafe,
+        body: body as Record<string, any>,
+        refreshTokens: enabledKeys.map((k) => k.key),
+        maskedToken,
+        startedAt,
+        waitUntil: (promise: Promise<unknown>) => {
+          try { c.executionCtx?.waitUntil(promise) } catch { /* 无 executionCtx 的运行时忽略 */ }
+        },
+      }
+      const nativeBody = { ...(body as Record<string, any>), model: modelConfig.id }
+      if (providerType === 'claude') {
+        const { handleClaudeRequest } = await import('./claude')
+        // /v1/messages 原生 Anthropic 协议透传；其余翻译成 Anthropic Messages
+        return handleClaudeRequest({ ...oauthParams, body: subPath === 'messages' ? nativeBody : (body as Record<string, any>) }, subPath === 'messages' ? 'messages-passthrough' : 'translate')
+      }
+      if (providerType === 'codex') {
+        const { handleCodexRequest } = await import('./codex')
+        // /v1/responses 原生 Responses 协议透传；其余翻译成 Responses
+        return handleCodexRequest({ ...oauthParams, body: subPath === 'responses' ? nativeBody : (body as Record<string, any>) }, subPath === 'responses' ? 'responses-passthrough' : 'translate')
+      }
+      if (providerType === 'kimi') {
+        const { handleKimiRequest } = await import('./kimi')
+        return handleKimiRequest(oauthParams)
+      }
+      const { handleGrokRequest } = await import('./grok')
+      return handleGrokRequest({ ...oauthParams, body: subPath === 'responses' ? nativeBody : (body as Record<string, any>) }, subPath === 'responses' ? 'responses-passthrough' : 'translate')
+    }
+
     if (isOpenCodeProvider(providerId)) {
       const response = await proxyOpenCodeRequest({
         baseUrl: provider.baseUrl,

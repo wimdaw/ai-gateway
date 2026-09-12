@@ -19,6 +19,15 @@ import {
   handleDeleteProxyKey,
   handleGetUsage,
   handleTtsPreview,
+  handleAntigravityOAuthStart,
+  handleAntigravityOAuthComplete,
+  handleAntigravityModels,
+  handleAntigravityQuotaAll,
+  handleAntigravityAccounts,
+  handleOAuthStart,
+  handleOAuthComplete,
+  handleOAuthPoll,
+  handleOAuthModels,
 } from './admin'
 import { renderHomePage, renderLoginPage, renderAdminPage } from './pages'
 import { seedInitialData, getSession } from './storage'
@@ -85,6 +94,19 @@ app.get('/admin/api/usage', handleGetUsage)
 
 // Azure TTS 音色试听(管理员会话, 返回 audio/mpeg)
 app.post('/admin/api/tts-preview', handleTtsPreview)
+
+// Antigravity 内置 OAuth 授权 + 可用模型(管理员会话)
+app.post('/admin/api/antigravity/oauth/start', handleAntigravityOAuthStart)
+app.post('/admin/api/antigravity/oauth/complete', handleAntigravityOAuthComplete)
+app.post('/admin/api/antigravity/models', handleAntigravityModels)
+app.post('/admin/api/antigravity/quota', handleAntigravityQuotaAll)
+app.post('/admin/api/antigravity/accounts', handleAntigravityAccounts)
+
+// OAuth 反代渠道内置授权(claude/codex: 授权链接; kimi/grok: 设备码轮询)
+app.post('/admin/api/oauth/:provider/start', handleOAuthStart)
+app.post('/admin/api/oauth/:provider/complete', handleOAuthComplete)
+app.post('/admin/api/oauth/:provider/poll', handleOAuthPoll)
+app.post('/admin/api/oauth/:provider/models', handleOAuthModels)
 
 // ===== 备份/恢复 =====
 app.get('/admin/api/backup/export', handleBackupExport)

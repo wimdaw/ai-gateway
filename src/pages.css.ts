@@ -326,6 +326,9 @@ label, legend { color: var(--color-ink-2); font-size: var(--text-xs); font-weigh
 .panel-actions > div, .detail-actions > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2xs); }
 .switch-label { min-height: var(--control-h); display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
 .gp, .provider-list, .key-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-xs); }
+.quota-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); }
+.quota-models { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 var(--space-lg); margin-block-start: var(--space-2xs); }
+.quota-card { padding: var(--space-sm); border: .0625rem solid var(--color-rule); border-radius: var(--radius-panel); background: var(--color-paper); min-width: 0; }
 .pi, .ki { min-width: 0; border: .0625rem solid var(--color-rule); border-radius: var(--radius-control); background: var(--color-paper); }
 .ps { min-height: 4.75rem; padding: var(--space-xs); display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); cursor: pointer; }
 .ps .l { min-width: 0; display: flex; align-items: center; gap: var(--space-xs); }
@@ -454,6 +457,7 @@ label, legend { color: var(--color-ink-2); font-size: var(--text-xs); font-weigh
   .panel-actions, .detail-actions { flex-direction: row; align-items: center; justify-content: space-between; }
   .ki { flex-direction: row; align-items: center; justify-content: space-between; }
   .grid-2-gap6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .quota-models { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (min-width: 60rem) {

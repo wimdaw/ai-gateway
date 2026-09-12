@@ -12,6 +12,19 @@ import {
   getUsageSummary,
 } from './storage'
 import { testModelConnectionRotating } from './proxy'
+import { testAntigravity, testAntigravityRotating, buildAntigravityAuthUrl, exchangeAntigravityCode, fetchAntigravityModels, fetchAntigravityQuota } from './antigravity'
+import {
+  buildClaudeAuthUrl, exchangeClaudeCode, testClaude, fetchClaudeModels,
+} from './claude'
+import {
+  buildCodexAuthUrl, exchangeCodexCode, testCodex,
+} from './codex'
+import {
+  startKimiDeviceFlow, pollKimiDeviceFlow, testKimi, fetchKimiModels,
+} from './kimi'
+import {
+  startGrokDeviceFlow, pollGrokDeviceFlow, testGrok,
+} from './grok'
 import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from './opencode'
 import { PROXY_KEY_PREFIX, EXPIRY_OPTIONS, OPENCODE_DEFAULT_URL } from './config'
 import type {
@@ -138,6 +151,7 @@ apiKeys: normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true })),
       ? normalizeModels(body.models)
       : [],
     mirrorUrls: normalizeMirrorUrls(body.mirrorUrls),
+    project: body.project,
     voice: body.voice,
     rate: body.rate,
     volume: body.volume,
@@ -166,6 +180,7 @@ export async function handleUpdateProvider(c: Context<{ Bindings: Env }>) {
   if (body.volume !== undefined) updates.volume = body.volume
   if (body.pitch !== undefined) updates.pitch = body.pitch
   if (body.mirrorUrls !== undefined) updates.mirrorUrls = normalizeMirrorUrls(body.mirrorUrls)
+  if (body.project !== undefined) updates.project = body.project
 if (body.apiKeys !== undefined) {
     updates.apiKeys = normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true }))
   }
@@ -228,9 +243,14 @@ export async function handleTestModel(c: Context<{ Bindings: Env }>) {
 
   const enabledKeys = provider.apiKeys.filter(k => k.enabled)
   // 多 key 轮询测试：逐个 key 尝试，遇 429/401/403/5xx 自动切换下一个 key，避免误报限流
+  const ptype = provider.type || 'openai'
   const result = isOpenCodeProvider(provider.id)
     ? await testOpenCodeModel(provider.baseUrl, enabledKeys, modelId, resolveProviderMirrorUrls(c.env, provider))
-    : await testModelConnectionRotating(provider.baseUrl, enabledKeys.map(k => k.key), modelId, provider.apiType)
+    : ptype === 'antigravity'
+      ? await testAntigravityRotating(c.env, enabledKeys.map(k => k.key), modelId, provider.project)
+      : ['claude', 'codex', 'kimi', 'grok'].includes(ptype)
+        ? await testOAuthProviderRotating(c.env, ptype, enabledKeys.map(k => k.key), modelId)
+        : await testModelConnectionRotating(provider.baseUrl, enabledKeys.map(k => k.key), modelId, provider.apiType)
 
   return c.json<ApiResponse>({
     success: true,
@@ -251,14 +271,36 @@ function buildAuthHeaders(apiKey: string, apiType?: string): Record<string, stri
 }
 
 export async function handleTestKeyNew(c: Context<{ Bindings: Env }>) {
-  const { url, apiKey, apiType, providerId, mirrorUrls, freeOnly } = await c.req.json<{
+  const { url, apiKey, apiType, providerType, providerId, mirrorUrls, freeOnly, model, project } = await c.req.json<{
     url: string
     apiKey: string
     apiType?: string
+    providerType?: string
     providerId?: string
     mirrorUrls?: string[] | string
     freeOnly?: boolean
+    model?: string
+    project?: string
   }>()
+
+  // antigravity: apiKey 即 refresh_token
+  if (providerType === 'antigravity') {
+    const r = await testAntigravity(c.env, apiKey, model || 'gemini-3.5-flash', project)
+    return c.json<ApiResponse>({
+      success: true,
+      data: { success: r.success, statusCode: r.statusCode || 0, message: r.message },
+    })
+  }
+
+  // OAuth 反代渠道: apiKey 即 refresh_token
+  if (providerType && ['claude', 'codex', 'kimi', 'grok'].includes(providerType)) {
+    const r = await testOAuthProvider(c.env, providerType, apiKey, model || OAUTH_DEFAULT_MODELS[providerType])
+    return c.json<ApiResponse>({
+      success: true,
+      data: { success: r.success, statusCode: r.statusCode || 0, message: r.message },
+    })
+  }
+
   if (!url) {
     return c.json<ApiResponse>({ success: false, message: 'url 为必填项' }, 400)
   }
@@ -335,14 +377,35 @@ function filterFreeModels(data: unknown): unknown {
 }
 
 export async function handleTestModelNew(c: Context<{ Bindings: Env }>) {
-  const { url, apiKey, apiType, model, providerId, mirrorUrls } = await c.req.json<{
+  const { url, apiKey, apiType, providerType, model, providerId, mirrorUrls, project } = await c.req.json<{
     url: string
     apiKey: string
     apiType?: string
+    providerType?: string
     model: string
     providerId?: string
     mirrorUrls?: string[] | string
+    project?: string
   }>()
+
+  // antigravity: apiKey 即 refresh_token
+  if (providerType === 'antigravity') {
+    const r = await testAntigravity(c.env, apiKey, model, project)
+    return c.json<ApiResponse>({
+      success: true,
+      data: { success: r.success, statusCode: r.statusCode || 0, message: r.message },
+    })
+  }
+
+  // OAuth 反代渠道: apiKey 即 refresh_token
+  if (providerType && ['claude', 'codex', 'kimi', 'grok'].includes(providerType)) {
+    const r = await testOAuthProvider(c.env, providerType, apiKey, model)
+    return c.json<ApiResponse>({
+      success: true,
+      data: { success: r.success, statusCode: r.statusCode || 0, message: r.message },
+    })
+  }
+
   if (!url || !model) {
     return c.json<ApiResponse>({ success: false, message: 'url、model 为必填项' }, 400)
   }
@@ -377,6 +440,241 @@ export async function handleTestModelNew(c: Context<{ Bindings: Env }>) {
       data: { success: false, statusCode: 0, message: (err as Error).message || '连接失败' },
     })
   }
+}
+
+// ===== Antigravity 内置 OAuth 授权 + 可用模型 =====
+
+export async function handleAntigravityOAuthStart(c: Context<{ Bindings: Env }>) {
+  try {
+    const { url, state } = await buildAntigravityAuthUrl(c.env)
+    return c.json<ApiResponse<{ url: string; state: string }>>({ success: true, data: { url, state } })
+  } catch (err) {
+    return c.json<ApiResponse>({ success: false, message: (err as Error).message || '生成授权链接失败' }, 500)
+  }
+}
+
+export async function handleAntigravityOAuthComplete(c: Context<{ Bindings: Env }>) {
+  const { code, state } = await c.req.json<{ code?: string; state?: string }>()
+  if (!code || !state) {
+    return c.json<ApiResponse>({ success: false, message: 'code、state 为必填项' }, 400)
+  }
+  try {
+    const { refreshToken } = await exchangeAntigravityCode(c.env, code, state)
+    return c.json<ApiResponse<{ refresh_token: string }>>({ success: true, data: { refresh_token: refreshToken } })
+  } catch (err) {
+    return c.json<ApiResponse>({ success: false, message: (err as Error).message || '换取 token 失败' }, 400)
+  }
+}
+
+/** 拉取 Antigravity 可用模型列表（用于回填模型配置） */
+export async function handleAntigravityModels(c: Context<{ Bindings: Env }>) {
+  const { apiKey } = await c.req.json<{ apiKey?: string }>()
+  if (!apiKey) {
+    return c.json<ApiResponse>({ success: false, message: '请先填写 refresh_token' }, 400)
+  }
+  const r = await fetchAntigravityModels(c.env, apiKey)
+  return c.json<ApiResponse<{ models: string[]; message?: string; raw?: unknown }>>({
+    success: r.success,
+    data: { models: r.models, message: r.message, raw: r.raw },
+    message: r.message,
+  })
+}
+
+/** 返回 Antigravity 渠道/账号清单（不调用 Google，供「刷新账号」用） */
+export async function handleAntigravityAccounts(c: Context<{ Bindings: Env }>) {
+  const providers = await getProviders(c.env)
+  const channels = providers
+    .filter((p) => (p.type || '') === 'antigravity' && p.enabled)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      accountCount: p.apiKeys.filter((k) => k.enabled && k.key && k.key.trim()).length,
+    }))
+  return c.json<ApiResponse<{ channels: unknown[] }>>({ success: true, data: { channels } })
+}
+
+/** 查询 Antigravity 额度（侧边栏「额度」用，凭据在服务端读取）
+ *  - 空 body：返回所有已启用渠道的全部账号
+ *  - { channelId, index }：只返回该渠道指定账号（账号级「查询」按钮用）
+ */
+export async function handleAntigravityQuotaAll(c: Context<{ Bindings: Env }>) {
+  const body = await c.req.json<{ channelId?: string; index?: number }>().catch(() => ({} as { channelId?: string; index?: number }))
+  const providers = await getProviders(c.env)
+  const ags = providers.filter((p) => (p.type || '') === 'antigravity' && p.enabled)
+
+  // 单账号查询
+  if (body.channelId) {
+    const p = ags.find((x) => x.id === body.channelId)
+    if (!p) return c.json<ApiResponse>({ success: false, message: `渠道 "${body.channelId}" 不存在` }, 404)
+    const keys = p.apiKeys.filter((k) => k.enabled).map((k) => k.key).filter((k) => k && k.trim())
+    const idx = Math.max(0, Number(body.index) || 0)
+    if (!keys[idx]) return c.json<ApiResponse>({ success: false, message: `该渠道第 ${idx + 1} 个账号不存在` }, 404)
+    const accounts = await fetchAntigravityQuota(c.env, [keys[idx]], p.project)
+    if (accounts[0]) accounts[0].index = idx
+    return c.json<ApiResponse<{ accounts: unknown[] }>>({ success: true, data: { accounts } })
+  }
+
+  // 全部渠道
+  const channels: Array<{ id: string; name: string; accounts: unknown[] }> = []
+  for (const p of ags) {
+    const keys = p.apiKeys.filter((k) => k.enabled).map((k) => k.key).filter((k) => k && k.trim())
+    if (keys.length === 0) {
+      channels.push({ id: p.id, name: p.name, accounts: [] })
+      continue
+    }
+    const accounts = await fetchAntigravityQuota(c.env, keys, p.project)
+    channels.push({ id: p.id, name: p.name, accounts })
+  }
+  return c.json<ApiResponse<{ channels: unknown[] }>>({ success: true, data: { channels } })
+}
+
+// ===== OAuth 反代渠道内置授权（claude / codex / kimi / grok） =====
+
+const OAUTH_PROVIDERS = new Set(['claude', 'codex', 'kimi', 'grok'])
+
+/** 测试用默认模型（新增渠道尚未填写模型时） */
+const OAUTH_DEFAULT_MODELS: Record<string, string> = {
+  claude: 'claude-sonnet-4-5-20250929',
+  codex: 'gpt-5.5',
+  kimi: 'kimi-for-coding',
+  grok: 'grok-4.6',
+}
+
+interface OAuthPollResult {
+  status: 'pending' | 'ok' | 'error'
+  message?: string
+  refreshToken?: string
+}
+
+/** 发起授权：claude/codex 返回授权链接；kimi/grok 返回设备码信息 */
+export async function handleOAuthStart(c: Context<{ Bindings: Env }>) {
+  const provider = c.req.param('provider') || ''
+  if (!OAUTH_PROVIDERS.has(provider)) {
+    return c.json<ApiResponse>({ success: false, message: `不支持的 OAuth 渠道类型: ${provider}` }, 400)
+  }
+  try {
+    if (provider === 'claude') {
+      const { url, state } = await buildClaudeAuthUrl(c.env)
+      return c.json<ApiResponse<{ mode: 'redirect'; url: string; state: string }>>({ success: true, data: { mode: 'redirect', url, state } })
+    }
+    if (provider === 'codex') {
+      const { url, state } = await buildCodexAuthUrl(c.env)
+      return c.json<ApiResponse<{ mode: 'redirect'; url: string; state: string }>>({ success: true, data: { mode: 'redirect', url, state } })
+    }
+    if (provider === 'kimi') {
+      const flow = await startKimiDeviceFlow(c.env)
+      return c.json<ApiResponse<{ mode: 'device'; state: string; verification_uri: string; verification_uri_complete?: string; user_code: string; interval: number }>>({
+        success: true,
+        data: { mode: 'device', state: flow.state, verification_uri: flow.verificationUri, verification_uri_complete: flow.verificationUriComplete, user_code: flow.userCode, interval: flow.interval },
+      })
+    }
+    const flow = await startGrokDeviceFlow(c.env)
+    return c.json<ApiResponse<{ mode: 'device'; state: string; verification_uri: string; verification_uri_complete?: string; user_code: string; interval: number }>>({
+      success: true,
+      data: { mode: 'device', state: flow.state, verification_uri: flow.verificationUri, verification_uri_complete: flow.verificationUriComplete, user_code: flow.userCode, interval: flow.interval },
+    })
+  } catch (err) {
+    return c.json<ApiResponse>({ success: false, message: (err as Error).message || '发起授权失败' }, 500)
+  }
+}
+
+/** 完成授权（claude/codex：code + state 换 refresh_token） */
+export async function handleOAuthComplete(c: Context<{ Bindings: Env }>) {
+  const provider = c.req.param('provider') || ''
+  const { code, state } = await c.req.json<{ code?: string; state?: string }>()
+  if (!code || !state) {
+    return c.json<ApiResponse>({ success: false, message: 'code、state 为必填项' }, 400)
+  }
+  try {
+    if (provider === 'claude') {
+      const { refreshToken } = await exchangeClaudeCode(c.env, code, state)
+      return c.json<ApiResponse<{ refresh_token: string }>>({ success: true, data: { refresh_token: refreshToken } })
+    }
+    if (provider === 'codex') {
+      const { refreshToken } = await exchangeCodexCode(c.env, code, state)
+      return c.json<ApiResponse<{ refresh_token: string }>>({ success: true, data: { refresh_token: refreshToken } })
+    }
+    return c.json<ApiResponse>({ success: false, message: `${provider} 渠道使用设备码授权，请用轮询接口` }, 400)
+  } catch (err) {
+    return c.json<ApiResponse>({ success: false, message: (err as Error).message || '换取 token 失败' }, 400)
+  }
+}
+
+/** 设备码授权轮询（kimi/grok）：pending / ok(refresh_token) / error */
+export async function handleOAuthPoll(c: Context<{ Bindings: Env }>) {
+  const provider = c.req.param('provider') || ''
+  const { state } = await c.req.json<{ state?: string }>()
+  if (!state) {
+    return c.json<ApiResponse>({ success: false, message: 'state 为必填项' }, 400)
+  }
+  try {
+    if (provider === 'kimi') {
+      const r = await pollKimiDeviceFlow(c.env, state)
+      return c.json<ApiResponse<OAuthPollResult>>({ success: true, data: r })
+    }
+    if (provider === 'grok') {
+      const r = await pollGrokDeviceFlow(c.env, state)
+      return c.json<ApiResponse<OAuthPollResult>>({ success: true, data: r })
+    }
+    return c.json<ApiResponse>({ success: false, message: `${provider} 渠道使用授权链接，请用 complete 接口` }, 400)
+  } catch (err) {
+    return c.json<ApiResponse>({ success: false, message: (err as Error).message || '轮询失败' }, 500)
+  }
+}
+
+/** 拉取可用模型（claude / kimi，凭据为 refresh_token） */
+export async function handleOAuthModels(c: Context<{ Bindings: Env }>) {
+  const provider = c.req.param('provider') || ''
+  const { apiKey } = await c.req.json<{ apiKey?: string }>()
+  if (!apiKey) {
+    return c.json<ApiResponse>({ success: false, message: '请先填写 refresh_token' }, 400)
+  }
+  if (provider === 'claude') {
+    const r = await fetchClaudeModels(c.env, apiKey)
+    return c.json<ApiResponse<{ models: string[]; message?: string }>>({ success: r.success, data: { models: r.models, message: r.message }, message: r.message })
+  }
+  if (provider === 'kimi') {
+    const r = await fetchKimiModels(c.env, apiKey)
+    return c.json<ApiResponse<{ models: string[]; message?: string }>>({ success: r.success, data: { models: r.models, message: r.message }, message: r.message })
+  }
+  return c.json<ApiResponse>({ success: false, message: `${provider} 渠道请手动填写模型列表` }, 400)
+}
+
+/** 单凭据连通性测试分发（OAuth 渠道） */
+async function testOAuthProvider(
+  env: Env,
+  provider: string,
+  refreshToken: string,
+  modelId: string,
+): Promise<{ success: boolean; message: string; statusCode?: number }> {
+  if (provider === 'claude') return testClaude(env, refreshToken, modelId)
+  if (provider === 'codex') return testCodex(env, refreshToken, modelId)
+  if (provider === 'kimi') return testKimi(env, refreshToken, modelId)
+  if (provider === 'grok') return testGrok(env, refreshToken, modelId)
+  return { success: false, message: `未知 OAuth 渠道类型: ${provider}` }
+}
+
+/** 多凭据轮换测试（OAuth 渠道），与 testModelConnectionRotating 语义一致 */
+async function testOAuthProviderRotating(
+  env: Env,
+  provider: string,
+  refreshTokens: string[],
+  modelId: string,
+): Promise<{ success: boolean; message: string; statusCode?: number }> {
+  const list = (refreshTokens || []).filter((t) => t && t.trim())
+  if (list.length === 0) return { success: false, message: '该渠道未配置任何 refresh_token', statusCode: 0 }
+  let last: { success: boolean; message: string; statusCode?: number } = { success: false, message: '连接失败', statusCode: 0 }
+  for (let i = 0; i < list.length; i++) {
+    const r = await testOAuthProvider(env, provider, list[i].trim(), modelId)
+    if (r.success) {
+      return { ...r, message: list.length > 1 ? `${r.message} (账号 #${i + 1}/${list.length})` : r.message }
+    }
+    last = r
+    const st = r.statusCode || 0
+    if (st === 429 || st === 401 || st === 403 || st >= 500) continue
+    break
+  }
+  return last
 }
 
 // ===== 令牌管理 =====

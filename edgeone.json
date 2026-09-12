@@ -1,6 +1,0 @@
-{
-  "name": "ai-gateway",
-  "installCommand": "npm install",
-  "outputDirectory": ".",
-  "nodeVersion": "22.11.0"
-}
