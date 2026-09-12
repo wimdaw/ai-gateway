@@ -404,11 +404,12 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
       })
     }
 
-    // ===== OAuth 反代渠道 (type = claude / codex / kimi / grok，复刻 CLIProxyAPI) =====
-    if (providerType === 'claude' || providerType === 'codex' || providerType === 'kimi' || providerType === 'grok') {
+    // ===== OAuth 反代渠道 (type = claude / codex / kimi / grok / qwen / deepseek，复刻 CLIProxyAPI 等实现) =====
+    const OAUTH_TYPES = ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek']
+    if (OAUTH_TYPES.includes(providerType)) {
       const supported = providerType === 'claude'
         ? ['chat/completions', 'messages']
-        : providerType === 'kimi'
+        : providerType === 'kimi' || providerType === 'qwen' || providerType === 'deepseek'
           ? ['chat/completions']
           : ['chat/completions', 'responses']
       if (!supported.includes(subPath)) {
@@ -443,6 +444,14 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
       if (providerType === 'kimi') {
         const { handleKimiRequest } = await import('./kimi')
         return handleKimiRequest(oauthParams)
+      }
+      if (providerType === 'qwen') {
+        const { handleQwenRequest } = await import('./qwen')
+        return handleQwenRequest(oauthParams)
+      }
+      if (providerType === 'deepseek') {
+        const { handleDeepSeekRequest } = await import('./deepseek')
+        return handleDeepSeekRequest(oauthParams, subPath)
       }
       const { handleGrokRequest } = await import('./grok')
       return handleGrokRequest({ ...oauthParams, body: subPath === 'responses' ? nativeBody : (body as Record<string, any>) }, subPath === 'responses' ? 'responses-passthrough' : 'translate')

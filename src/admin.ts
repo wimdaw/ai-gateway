@@ -25,6 +25,12 @@ import {
 import {
   startGrokDeviceFlow, pollGrokDeviceFlow, testGrok,
 } from './grok'
+import {
+  startQwenDeviceFlow, pollQwenDeviceFlow, testQwen, fetchQwenModels,
+} from './qwen'
+import {
+  testDeepSeek, fetchDeepSeekModels,
+} from './deepseek'
 import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from './opencode'
 import { PROXY_KEY_PREFIX, EXPIRY_OPTIONS, OPENCODE_DEFAULT_URL } from './config'
 import type {
@@ -248,7 +254,7 @@ export async function handleTestModel(c: Context<{ Bindings: Env }>) {
     ? await testOpenCodeModel(provider.baseUrl, enabledKeys, modelId, resolveProviderMirrorUrls(c.env, provider))
     : ptype === 'antigravity'
       ? await testAntigravityRotating(c.env, enabledKeys.map(k => k.key), modelId, provider.project)
-      : ['claude', 'codex', 'kimi', 'grok'].includes(ptype)
+      : ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek'].includes(ptype)
         ? await testOAuthProviderRotating(c.env, ptype, enabledKeys.map(k => k.key), modelId)
         : await testModelConnectionRotating(provider.baseUrl, enabledKeys.map(k => k.key), modelId, provider.apiType)
 
@@ -293,7 +299,7 @@ export async function handleTestKeyNew(c: Context<{ Bindings: Env }>) {
   }
 
   // OAuth 反代渠道: apiKey 即 refresh_token
-  if (providerType && ['claude', 'codex', 'kimi', 'grok'].includes(providerType)) {
+  if (providerType && ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek'].includes(providerType)) {
     const r = await testOAuthProvider(c.env, providerType, apiKey, model || OAUTH_DEFAULT_MODELS[providerType])
     return c.json<ApiResponse>({
       success: true,
@@ -398,7 +404,7 @@ export async function handleTestModelNew(c: Context<{ Bindings: Env }>) {
   }
 
   // OAuth 反代渠道: apiKey 即 refresh_token
-  if (providerType && ['claude', 'codex', 'kimi', 'grok'].includes(providerType)) {
+  if (providerType && ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek'].includes(providerType)) {
     const r = await testOAuthProvider(c.env, providerType, apiKey, model)
     return c.json<ApiResponse>({
       success: true,
@@ -530,7 +536,9 @@ export async function handleAntigravityQuotaAll(c: Context<{ Bindings: Env }>) {
 
 // ===== OAuth 反代渠道内置授权（claude / codex / kimi / grok） =====
 
-const OAUTH_PROVIDERS = new Set(['claude', 'codex', 'kimi', 'grok'])
+const OAUTH_PROVIDERS = new Set(['claude', 'codex', 'kimi', 'grok', 'qwen'])
+// 无 OAuth 流程、凭据需从浏览器复制的渠道类型（deepseek 网页版 userToken）
+const MANUAL_TOKEN_PROVIDERS = new Set(['deepseek'])
 
 /** 测试用默认模型（新增渠道尚未填写模型时） */
 const OAUTH_DEFAULT_MODELS: Record<string, string> = {
@@ -538,6 +546,8 @@ const OAUTH_DEFAULT_MODELS: Record<string, string> = {
   codex: 'gpt-5.5',
   kimi: 'kimi-for-coding',
   grok: 'grok-4.6',
+  qwen: 'coder-model',
+  deepseek: 'deepseek-v4-flash',
 }
 
 interface OAuthPollResult {
@@ -546,7 +556,7 @@ interface OAuthPollResult {
   refreshToken?: string
 }
 
-/** 发起授权：claude/codex 返回授权链接；kimi/grok 返回设备码信息 */
+/** 发起授权：claude/codex 返回授权链接；kimi/grok/qwen 返回设备码信息 */
 export async function handleOAuthStart(c: Context<{ Bindings: Env }>) {
   const provider = c.req.param('provider') || ''
   if (!OAUTH_PROVIDERS.has(provider)) {
@@ -561,14 +571,11 @@ export async function handleOAuthStart(c: Context<{ Bindings: Env }>) {
       const { url, state } = await buildCodexAuthUrl(c.env)
       return c.json<ApiResponse<{ mode: 'redirect'; url: string; state: string }>>({ success: true, data: { mode: 'redirect', url, state } })
     }
-    if (provider === 'kimi') {
-      const flow = await startKimiDeviceFlow(c.env)
-      return c.json<ApiResponse<{ mode: 'device'; state: string; verification_uri: string; verification_uri_complete?: string; user_code: string; interval: number }>>({
-        success: true,
-        data: { mode: 'device', state: flow.state, verification_uri: flow.verificationUri, verification_uri_complete: flow.verificationUriComplete, user_code: flow.userCode, interval: flow.interval },
-      })
-    }
-    const flow = await startGrokDeviceFlow(c.env)
+    const flow = provider === 'kimi'
+      ? await startKimiDeviceFlow(c.env)
+      : provider === 'qwen'
+        ? await startQwenDeviceFlow(c.env)
+        : await startGrokDeviceFlow(c.env)
     return c.json<ApiResponse<{ mode: 'device'; state: string; verification_uri: string; verification_uri_complete?: string; user_code: string; interval: number }>>({
       success: true,
       data: { mode: 'device', state: flow.state, verification_uri: flow.verificationUri, verification_uri_complete: flow.verificationUriComplete, user_code: flow.userCode, interval: flow.interval },
@@ -612,6 +619,10 @@ export async function handleOAuthPoll(c: Context<{ Bindings: Env }>) {
       const r = await pollKimiDeviceFlow(c.env, state)
       return c.json<ApiResponse<OAuthPollResult>>({ success: true, data: r })
     }
+    if (provider === 'qwen') {
+      const r = await pollQwenDeviceFlow(c.env, state)
+      return c.json<ApiResponse<OAuthPollResult>>({ success: true, data: r })
+    }
     if (provider === 'grok') {
       const r = await pollGrokDeviceFlow(c.env, state)
       return c.json<ApiResponse<OAuthPollResult>>({ success: true, data: r })
@@ -637,6 +648,15 @@ export async function handleOAuthModels(c: Context<{ Bindings: Env }>) {
     const r = await fetchKimiModels(c.env, apiKey)
     return c.json<ApiResponse<{ models: string[]; message?: string }>>({ success: r.success, data: { models: r.models, message: r.message }, message: r.message })
   }
+  if (provider === 'qwen') {
+    // 上游无 /v1/models，返回本地维护清单
+    const r = fetchQwenModels()
+    return c.json<ApiResponse<{ models: string[] }>>({ success: true, data: { models: r.models } })
+  }
+  if (provider === 'deepseek') {
+    const r = fetchDeepSeekModels()
+    return c.json<ApiResponse<{ models: string[] }>>({ success: true, data: { models: r.models } })
+  }
   return c.json<ApiResponse>({ success: false, message: `${provider} 渠道请手动填写模型列表` }, 400)
 }
 
@@ -651,6 +671,8 @@ async function testOAuthProvider(
   if (provider === 'codex') return testCodex(env, refreshToken, modelId)
   if (provider === 'kimi') return testKimi(env, refreshToken, modelId)
   if (provider === 'grok') return testGrok(env, refreshToken, modelId)
+  if (provider === 'qwen') return testQwen(env, refreshToken, modelId)
+  if (provider === 'deepseek') return testDeepSeek(env, refreshToken, modelId)
   return { success: false, message: `未知 OAuth 渠道类型: ${provider}` }
 }
 

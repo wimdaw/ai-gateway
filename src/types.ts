@@ -17,7 +17,8 @@ export interface Provider {
   apiType?: 'openai' | 'anthropic'
   /**
    * 渠道类型: openai | openai-video | agnes-video | azure-tts | antigravity
-   *          | claude | codex | kimi | grok (OAuth 反代, 复刻 CLIProxyAPI, 缺省 openai)
+   *          | claude | codex | kimi | grok | qwen (OAuth 反代, 复刻 CLIProxyAPI)
+   *          | deepseek (网页版 userToken 反代, 缺省 openai)
    */
   type?: string
   apiKeys: ApiKeyEntry[]

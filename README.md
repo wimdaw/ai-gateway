@@ -164,6 +164,58 @@ OAuth refresh_token，网关自动换取/缓存 access_token（KV 缓存、支�
 > 授权入口使用各平台 CLI 的公开 OAuth 客户端（与 CLIProxyAPI 一致）。Codex 对出口 IP 有
 > 地区限制，需部署在 OpenAI 支持的地区（Cloudflare Workers 默认出口通常可用）。
 
+## Qwen 反代（`qwen` 渠道）
+
+复刻 CLIProxyAPI v6 的 Qwen 实现与 Qwen Code CLI：设备码授权（RFC 8628）+ PKCE，
+client_id `f0304373b74a44d2b584a3fb70ca9e56`，端点在 `chat.qwen.ai/api/v1/oauth2/*`，
+scope `openid profile email model.completion`。上游为 OpenAI 兼容接口，基址取自 token 响应的
+`resource_url`（默认 `https://portal.qwen.ai/v1`），请求 `/chat/completions` 直通。
+
+- 后台「添加渠道」→ 类型选 **Qwen OAuth 反代** → 点 **「授权登录获取 refresh_token」**（设备码流程，
+  弹窗自动轮询）→ refresh_token 自动填入 API Keys。
+- 上游不提供 `/v1/models`，点「获取模型列表」返回内置清单：`coder-model`、`qwen3-coder-plus`、
+  `qwen3-coder-flash`、`vision-model`（也可自行填写）。
+- ⚠️ **实测状态（2026-09）**：`device/code` 端点仍能正常下发设备码，但 `oauth2/token` 端点
+  对换码/刷新请求一律返回 `405`（阿里云边缘页，官方 qwen-code 客户端同样如此），因此 Qwen 免费
+  OAuth 目前**无法完成授权**——这与社区反馈的「Qwen 免费额度已停止」一致。代码保留为正确实现，
+  待上游恢复即可使用；现阶段如需 Qwen，建议用「OpenAI 兼容」渠道 + DashScope API Key。
+- 注：Qwen 的阿里云 WAF 会拦截**没有 User-Agent** 的请求，本模块所有 OAuth 请求均已带 UA。
+
+## DeepSeek 反代（`deepseek` 渠道）
+
+DeepSeek **没有官方 OAuth**。该渠道支持两种凭据，按凭据前缀自动分流：
+
+### 模式一：官方 API Key（`sk-` 开头）— 推荐，免费版可用
+
+直连 `https://api.deepseek.com/chat/completions`（OpenAI 兼容），无 PoW、无额外 CPU 开销，
+用现有渠道的 Key 轮换/健康检查逻辑。模型名按官方 API 支持的填（如 `deepseek-chat`、
+`deepseek-reasoner`，以官方文档为准）。
+
+### 模式二：网页 userToken — 免费额度路线，需 Workers Paid
+
+复刻 GitHub 上 deepseek 网页反代的通行做法（参考 `NIyueeE/ds-free-api`、`CJackHwang/ds2api`、
+`xiaoY233/Chat2API`）：
+
+1. 凭据是 `chat.deepseek.com` 网页会话的 **userToken**（浏览器 `localStorage.userToken`，JWT，约 24 小时有效）
+2. 每次请求：创建会话 → 取 PoW challenge → 解 **DeepSeekHashV1** PoW → 带 `x-ds-pow-response`
+   请求 `/api/v0/chat/completion`（SSE）
+3. 把 DeepSeek 的 `p/o/v` delta 事件流（`THINK`/`RESPONSE` fragment）翻译成 OpenAI 格式，
+   思考内容映射到 `reasoning_content`
+
+PoW 为纯 JS 实现（`src/deepseek-pow.ts`，Keccak-f[1600] 跳过 round 0，**不是**标准 SHA3-256），
+已用官方向量校验通过；难度 144000 时平均约 0.33 秒、最坏约 0.65 秒纯 CPU。
+
+> ⚠️ **已在线上实测的两点限制**
+> - **需要 Cloudflare Workers Paid 套餐**：PoW 是 CPU 密集计算，免费版 10ms CPU 上限会被运行时
+>   以 `error code: 1102` 终止（本账号实测为 Free 套餐，故模式二当前不可用）。
+> - 网页接口非官方 API，存在账号风控风险，且 userToken 约 24 小时过期需重新粘贴。
+
+配置步骤：类型选 **DeepSeek 网页反代** → 把 API Key 或 userToken 填入 API Keys →
+点「验证 userToken / API Key」校验。内置模型：`deepseek-v4-flash`、`deepseek-v4-pro`、
+`deepseek-v4-flash-search`、`deepseek-v4-pro-search`（网页模式按其语义映射 `model_type`/`thinking`/`search`）。
+
+
+
 
 ## 架构
 
