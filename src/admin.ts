@@ -31,6 +31,7 @@ import {
 import {
   testDeepSeek, fetchDeepSeekModels,
 } from './deepseek'
+import { fetchZaiModels } from './zai'
 import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from './opencode'
 import { PROXY_KEY_PREFIX, EXPIRY_OPTIONS, OPENCODE_DEFAULT_URL } from './config'
 import type {
@@ -255,7 +256,7 @@ export async function handleTestModel(c: Context<{ Bindings: Env }>) {
     : ptype === 'antigravity'
       ? await testAntigravityRotating(c.env, enabledKeys.map(k => k.key), modelId, provider.project)
       : ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek'].includes(ptype)
-        ? await testOAuthProviderRotating(c.env, ptype, enabledKeys.map(k => k.key), modelId)
+        ? await testOAuthProviderRotating(c.env, ptype, enabledKeys.map(k => k.key), modelId, provider.baseUrl)
         : await testModelConnectionRotating(provider.baseUrl, enabledKeys.map(k => k.key), modelId, provider.apiType)
 
   return c.json<ApiResponse>({
@@ -300,10 +301,20 @@ export async function handleTestKeyNew(c: Context<{ Bindings: Env }>) {
 
   // OAuth 反代渠道: apiKey 即 refresh_token
   if (providerType && ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek'].includes(providerType)) {
-    const r = await testOAuthProvider(c.env, providerType, apiKey, model || OAUTH_DEFAULT_MODELS[providerType])
+    const r = await testOAuthProvider(c.env, providerType, apiKey, model || OAUTH_DEFAULT_MODELS[providerType], url)
     return c.json<ApiResponse>({
       success: true,
       data: { success: r.success, statusCode: r.statusCode || 0, message: r.message },
+    })
+  }
+
+  // Z.AI: 上游 /models 需有效 Key，这里回内置清单（供「获取模型」按钮使用）
+  if (providerType === 'zai') {
+    const models = fetchZaiModels().models
+    const list = (freeOnly ? models.filter((m) => /flash|air/i.test(m)) : models).map((id) => ({ id }))
+    return c.json<ApiResponse>({
+      success: true,
+      data: { success: true, statusCode: 200, data: { object: 'list', data: list } },
     })
   }
 
@@ -405,7 +416,7 @@ export async function handleTestModelNew(c: Context<{ Bindings: Env }>) {
 
   // OAuth 反代渠道: apiKey 即 refresh_token
   if (providerType && ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek'].includes(providerType)) {
-    const r = await testOAuthProvider(c.env, providerType, apiKey, model)
+    const r = await testOAuthProvider(c.env, providerType, apiKey, model, url)
     return c.json<ApiResponse>({
       success: true,
       data: { success: r.success, statusCode: r.statusCode || 0, message: r.message },
@@ -559,6 +570,7 @@ interface OAuthPollResult {
 /** 发起授权：claude/codex 返回授权链接；kimi/grok/qwen 返回设备码信息 */
 export async function handleOAuthStart(c: Context<{ Bindings: Env }>) {
   const provider = c.req.param('provider') || ''
+  const body = await c.req.json<{ baseUrl?: string }>().catch(() => ({} as { baseUrl?: string }))
   if (!OAUTH_PROVIDERS.has(provider)) {
     return c.json<ApiResponse>({ success: false, message: `不支持的 OAuth 渠道类型: ${provider}` }, 400)
   }
@@ -572,7 +584,7 @@ export async function handleOAuthStart(c: Context<{ Bindings: Env }>) {
       return c.json<ApiResponse<{ mode: 'redirect'; url: string; state: string }>>({ success: true, data: { mode: 'redirect', url, state } })
     }
     const flow = provider === 'kimi'
-      ? await startKimiDeviceFlow(c.env)
+      ? await startKimiDeviceFlow(c.env, body.baseUrl)
       : provider === 'qwen'
         ? await startQwenDeviceFlow(c.env)
         : await startGrokDeviceFlow(c.env)
@@ -636,7 +648,7 @@ export async function handleOAuthPoll(c: Context<{ Bindings: Env }>) {
 /** 拉取可用模型（claude / kimi，凭据为 refresh_token） */
 export async function handleOAuthModels(c: Context<{ Bindings: Env }>) {
   const provider = c.req.param('provider') || ''
-  const { apiKey } = await c.req.json<{ apiKey?: string }>()
+  const { apiKey, baseUrl } = await c.req.json<{ apiKey?: string; baseUrl?: string }>()
   if (!apiKey) {
     return c.json<ApiResponse>({ success: false, message: '请先填写 refresh_token' }, 400)
   }
@@ -645,7 +657,7 @@ export async function handleOAuthModels(c: Context<{ Bindings: Env }>) {
     return c.json<ApiResponse<{ models: string[]; message?: string }>>({ success: r.success, data: { models: r.models, message: r.message }, message: r.message })
   }
   if (provider === 'kimi') {
-    const r = await fetchKimiModels(c.env, apiKey)
+    const r = await fetchKimiModels(c.env, apiKey, baseUrl)
     return c.json<ApiResponse<{ models: string[]; message?: string }>>({ success: r.success, data: { models: r.models, message: r.message }, message: r.message })
   }
   if (provider === 'qwen') {
@@ -666,10 +678,11 @@ async function testOAuthProvider(
   provider: string,
   refreshToken: string,
   modelId: string,
+  baseUrl?: string,
 ): Promise<{ success: boolean; message: string; statusCode?: number }> {
   if (provider === 'claude') return testClaude(env, refreshToken, modelId)
   if (provider === 'codex') return testCodex(env, refreshToken, modelId)
-  if (provider === 'kimi') return testKimi(env, refreshToken, modelId)
+  if (provider === 'kimi') return testKimi(env, refreshToken, modelId, baseUrl)
   if (provider === 'grok') return testGrok(env, refreshToken, modelId)
   if (provider === 'qwen') return testQwen(env, refreshToken, modelId)
   if (provider === 'deepseek') return testDeepSeek(env, refreshToken, modelId)
@@ -682,12 +695,13 @@ async function testOAuthProviderRotating(
   provider: string,
   refreshTokens: string[],
   modelId: string,
+  baseUrl?: string,
 ): Promise<{ success: boolean; message: string; statusCode?: number }> {
   const list = (refreshTokens || []).filter((t) => t && t.trim())
   if (list.length === 0) return { success: false, message: '该渠道未配置任何 refresh_token', statusCode: 0 }
   let last: { success: boolean; message: string; statusCode?: number } = { success: false, message: '连接失败', statusCode: 0 }
   for (let i = 0; i < list.length; i++) {
-    const r = await testOAuthProvider(env, provider, list[i].trim(), modelId)
+    const r = await testOAuthProvider(env, provider, list[i].trim(), modelId, baseUrl)
     if (r.success) {
       return { ...r, message: list.length > 1 ? `${r.message} (账号 #${i + 1}/${list.length})` : r.message }
     }

@@ -147,7 +147,7 @@ OAuth refresh_token，网关自动换取/缓存 access_token（KV 缓存、支�
 |----------|-----------|------|------|
 | `claude` | Claude Code 客户端 OAuth（PKCE，授权链接） | `api.anthropic.com/v1/messages` | Anthropic Messages 协议；原生 `/v1/messages` 请求直接透传 |
 | `codex` | Codex CLI OAuth（PKCE，授权链接） | `chatgpt.com/backend-api/codex/responses` | OpenAI Responses 协议，自动带 `Chatgpt-Account-Id`；原生 `/v1/responses` 透传 |
-| `kimi` | Kimi 设备码（RFC 8628） | `api.kimi.com/coding/v1/chat/completions` | OpenAI 兼容直通，模型名自动归一化（如 `kimi-k2.8` → `kimi-for-coding`） |
+| `kimi` | Kimi 设备码（RFC 8628，**国际站优先**） | `api.kimi.ai/coding/v1/chat/completions` | OpenAI 兼容直通，模型名自动归一化（如 `kimi-k2.8` → `kimi-for-coding`） |
 | `grok` | xAI Grok CLI 设备码（OIDC 发现） | `cli-chat-proxy.grok.com/v1/responses` | OpenAI Responses 协议，带 Grok CLI 身份头；原生 `/v1/responses` 透传 |
 
 ### 配置步骤
@@ -210,9 +210,43 @@ PoW 为纯 JS 实现（`src/deepseek-pow.ts`，Keccak-f[1600] 跳过 round 0，*
 >   以 `error code: 1102` 终止（本账号实测为 Free 套餐，故模式二当前不可用）。
 > - 网页接口非官方 API，存在账号风控风险，且 userToken 约 24 小时过期需重新粘贴。
 
-配置步骤：类型选 **DeepSeek 网页反代** → 把 API Key 或 userToken 填入 API Keys →
+配置步骤：类型选 **DeepSeek 反代** → 把 API Key 或 userToken 填入 API Keys →
 点「验证 userToken / API Key」校验。内置模型：`deepseek-v4-flash`、`deepseek-v4-pro`、
 `deepseek-v4-flash-search`、`deepseek-v4-pro-search`（网页模式按其语义映射 `model_type`/`thinking`/`search`）。
+
+## Z.AI 预设渠道（`zai` 渠道，智谱 GLM 国际站）
+
+Z.AI **没有 OAuth**，官方只提供 API Key（在 z.ai 控制台「API Keys」里创建，编码套餐从
+`z.ai/subscribe` 订阅）。因此本渠道是「预设」而非反代：填 API Key 即用，无 token 交换、无 PoW。
+
+一个 `zai` 渠道同时兼容两种协议，网关按请求路径自动切换：
+
+| 客户端请求 | 实际上游 |
+|---|---|
+| `/v1/chat/completions`（OpenAI 协议） | `https://api.z.ai/api/coding/paas/v4/chat/completions` |
+| `/v1/messages`（Anthropic 协议，Claude Code 等） | `https://api.z.ai/api/anthropic/v1/messages` |
+
+- 鉴权：`Authorization: Bearer <key>`（Anthropic 端点同时接受 `x-api-key`）
+- 内置模型（点「获取模型」返回，可自行增删）：`glm-5.3`、`glm-5.3-flash`、`glm-4.7`、
+  `glm-4.7-flash`、`glm-4.6`、`glm-4.5-air`
+- 按量付费的通用端点如需使用，把 API 地址改成 `https://api.z.ai/api/paas/v4` 即可；
+  中国大陆平台可改为 `https://open.bigmodel.cn/api/paas/v4`（或 Anthropic 用
+  `https://open.bigmodel.cn/api/anthropic/v1`）。
+- 注：编码套餐的 Key 与通用 API Key 不通用（官方说明「Team Plan Key is not interchangeable」）。
+
+## Kimi 国际站 / 中国站
+
+Kimi 有两套 host，`client_id` 相同，网关按渠道的 **API 地址**自动选站：
+
+| | 国际站（默认） | 中国站 |
+|---|---|---|
+| OAuth | `https://auth.kimi.ai` | `https://auth.kimi.com` |
+| API | `https://api.kimi.ai/coding` | `https://api.kimi.com/coding` |
+
+新建 kimi 渠道时 API 地址默认填 `https://api.kimi.ai/coding`（国际站）；若要中国站，把地址改成
+`https://api.kimi.com/coding` 再点授权即可——设备码页面会分别显示 `www.kimi.ai` / `www.kimi.com`。
+这与官方 `kimi-code` CLI 的 region profile（`global` / `mainland-cn`）一致。
+
 
 
 

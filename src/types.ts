@@ -18,7 +18,7 @@ export interface Provider {
   /**
    * 渠道类型: openai | openai-video | agnes-video | azure-tts | antigravity
    *          | claude | codex | kimi | grok | qwen (OAuth 反代, 复刻 CLIProxyAPI)
-   *          | deepseek (网页版 userToken 反代, 缺省 openai)
+   *          | deepseek (官方 API Key / 网页 userToken 反代) | zai (Z.AI 预设, 缺省 openai)
    */
   type?: string
   apiKeys: ApiKeyEntry[]

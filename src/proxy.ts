@@ -443,7 +443,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
       }
       if (providerType === 'kimi') {
         const { handleKimiRequest } = await import('./kimi')
-        return handleKimiRequest(oauthParams)
+        return handleKimiRequest(oauthParams, provider.baseUrl)
       }
       if (providerType === 'qwen') {
         const { handleQwenRequest } = await import('./qwen')
@@ -487,7 +487,21 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
       return new Response(responseBody, { status: response.status, statusText: response.statusText, headers })
     }
 
-    const cleanBase = provider.baseUrl.replace(/\/$/, '')
+    // Z.AI(国际) 预设：同一渠道同时兼容 OpenAI 与 Anthropic 两种协议
+    // （编码套餐两个端点不同：OpenAI 走 /api/coding/paas/v4，Anthropic 走 /api/anthropic/v1）
+    let upstreamApiType = provider.apiType
+    let upstreamBase = provider.baseUrl
+    if (providerType === 'zai') {
+      if (subPath === 'messages') {
+        upstreamApiType = 'anthropic'
+        upstreamBase = 'https://api.z.ai/api/anthropic/v1'
+      } else {
+        upstreamApiType = 'openai'
+        upstreamBase = /\/api\/paas\//.test(provider.baseUrl) ? provider.baseUrl : 'https://api.z.ai/api/coding/paas/v4'
+      }
+    }
+
+    const cleanBase = upstreamBase.replace(/\/$/, '')
     const forwardUrl = `${cleanBase}/${subPath}${url.search}`
 
     // 无 Key 渠道（免 Key 服务如 kilo.ai）：直接转发，不带 Authorization
@@ -495,7 +509,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
       const forwardHeaders: Record<string, string> = {
         'Content-Type': forwardContentType,
       }
-      if (provider.apiType === 'anthropic') {
+      if (upstreamApiType === 'anthropic') {
         forwardHeaders['anthropic-version'] = '2023-06-01'
       }
       try {
@@ -594,7 +608,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
         const forwardHeaders: Record<string, string> = {
           'Content-Type': forwardContentType,
         }
-        if (provider.apiType === 'anthropic') {
+        if (upstreamApiType === 'anthropic') {
           forwardHeaders['x-api-key'] = apiKey
           forwardHeaders['anthropic-version'] = '2023-06-01'
         } else {

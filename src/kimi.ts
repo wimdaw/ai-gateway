@@ -2,9 +2,9 @@
  * Kimi (Moonshot) OAuth 反代 (provider.type = 'kimi')
  *
  * 复刻 CLIProxyAPI 的 Kimi OAuth + executor：
- *  1. RFC 8628 设备码授权：POST auth.kimi.com/api/oauth/device_authorization 拿
+ *  1. RFC 8628 设备码授权（国际站 auth.kimi.ai / 中国站 auth.kimi.com，按渠道 baseUrl 自动选择）：
  *     verification_uri + user_code，用户在浏览器确认后轮询 /api/oauth/token 换 token
- *  2. 上游 api.kimi.com/coding/v1/chat/completions 为 OpenAI 兼容协议，
+ *  2. 上游 api.kimi.ai/coding/v1/chat/completions 为 OpenAI 兼容协议，
  *     Bearer access_token 直连，请求/响应原样透传（仅归一化模型名）
  *  3. 模型别名归一化：kimi-k2.x / k2.x-code -> kimi-for-coding（与 CLIProxyAPI 一致）
  *
@@ -24,9 +24,16 @@ import {
 } from './oauth-common'
 
 const KIMI_CLIENT_ID = '17e5f671-d194-4dfb-9706-5516cb48c098'
-const KIMI_DEVICE_URL = 'https://auth.kimi.com/api/oauth/device_authorization'
-const KIMI_TOKEN_URL = 'https://auth.kimi.com/api/oauth/token'
-const KIMI_API_BASE = 'https://api.kimi.com/coding'
+// 国际站（kimi.ai，默认）与中国站（kimi.com）两套 host，client_id 相同。
+// 参照官方 kimi-code CLI 的 region profile（global / mainland-cn）。
+const KIMI_INTL = { auth: 'https://auth.kimi.ai', api: 'https://api.kimi.ai/coding' }
+const KIMI_CN = { auth: 'https://auth.kimi.com', api: 'https://api.kimi.com/coding' }
+const KIMI_DEFAULT = KIMI_INTL
+
+/** 依据渠道 baseUrl 判断区域：含 kimi.com 走中国站，其余（默认）走国际站 */
+function kimiRegion(baseUrl?: string): { auth: string; api: string } {
+  return /kimi\.com/i.test(baseUrl || '') ? KIMI_CN : KIMI_DEFAULT
+}
 
 const AT_PREFIX = 'kimi:at:'
 const DEVICE_PREFIX = 'kimi:device:'
@@ -57,10 +64,11 @@ export interface KimiDeviceFlow {
   interval: number
 }
 
-export async function startKimiDeviceFlow(env: Env): Promise<KimiDeviceFlow> {
+export async function startKimiDeviceFlow(env: Env, baseUrl?: string): Promise<KimiDeviceFlow> {
+  const region = kimiRegion(baseUrl)
   const deviceId = randomId()
   const form = new URLSearchParams({ client_id: KIMI_CLIENT_ID })
-  const res = await fetch(KIMI_DEVICE_URL, {
+  const res = await fetch(`${region.auth}/api/oauth/device_authorization`, {
     method: 'POST',
     headers: mshHeaders(deviceId),
     body: form.toString(),
@@ -74,6 +82,7 @@ export async function startKimiDeviceFlow(env: Env): Promise<KimiDeviceFlow> {
   await getKV(env).put(DEVICE_PREFIX + state, JSON.stringify({
     deviceCode: json.device_code,
     deviceId,
+    auth: region.auth,
   }), { expirationTtl: Math.max(300, Number(json.expires_in) || 900) }).catch(() => {})
   return {
     state,
@@ -94,13 +103,13 @@ export interface KimiPollResult {
 export async function pollKimiDeviceFlow(env: Env, state: string): Promise<KimiPollResult> {
   const raw = await getKV(env).get(DEVICE_PREFIX + state)
   if (!raw) return { status: 'error', message: '设备码会话不存在或已过期，请重新发起授权' }
-  const { deviceCode, deviceId } = JSON.parse(raw) as { deviceCode: string; deviceId: string }
+  const { deviceCode, deviceId, auth } = JSON.parse(raw) as { deviceCode: string; deviceId: string; auth?: string }
   const form = new URLSearchParams({
     client_id: KIMI_CLIENT_ID,
     device_code: deviceCode,
     grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
   })
-  const res = await fetch(KIMI_TOKEN_URL, {
+  const res = await fetch(`${auth || KIMI_DEFAULT.auth}/api/oauth/token`, {
     method: 'POST',
     headers: mshHeaders(deviceId),
     body: form.toString(),
@@ -131,14 +140,14 @@ export async function pollKimiDeviceFlow(env: Env, state: string): Promise<KimiP
 // access_token 刷新（KV 缓存）
 // =====================================================================
 
-async function refreshKimiToken(refreshToken: string): Promise<{ accessToken: string; expiresIn: number; refreshToken?: string }> {
+async function refreshKimiToken(region: { auth: string; api: string }, refreshToken: string): Promise<{ accessToken: string; expiresIn: number; refreshToken?: string; extra?: Record<string, string> }> {
   const deviceId = randomId()
   const form = new URLSearchParams({
     client_id: KIMI_CLIENT_ID,
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
   })
-  const res = await fetch(KIMI_TOKEN_URL, {
+  const res = await fetch(`${region.auth}/api/oauth/token`, {
     method: 'POST',
     headers: mshHeaders(deviceId),
     body: form.toString(),
@@ -152,8 +161,8 @@ async function refreshKimiToken(refreshToken: string): Promise<{ accessToken: st
   return { accessToken: json.access_token, expiresIn: Number(json.expires_in) || 3600, refreshToken: json.refresh_token || undefined }
 }
 
-async function getAccessToken(env: Env, refreshToken: string): Promise<string> {
-  return (await resolveAccessToken(env, AT_PREFIX, refreshToken, refreshKimiToken)).accessToken
+async function getAccessToken(env: Env, region: { auth: string; api: string }, refreshToken: string): Promise<string> {
+  return (await resolveAccessToken(env, AT_PREFIX, refreshToken, (token) => refreshKimiToken(region, token))).accessToken
 }
 
 // =====================================================================
@@ -183,7 +192,8 @@ export function normalizeKimiModel(model: string): string {
 // 对外入口（OpenAI 兼容直通）
 // =====================================================================
 
-export async function handleKimiRequest(p: OAuthCallParams): Promise<Response> {
+export async function handleKimiRequest(p: OAuthCallParams, baseUrl?: string): Promise<Response> {
+  const region = kimiRegion(baseUrl)
   const tokens = (p.refreshTokens || []).filter((t) => t && t.trim())
   if (tokens.length === 0) {
     return oauthErrorResponse('该 kimi 渠道未配置凭据：请在「API Key」里每行填入一个 Kimi OAuth refresh_token（可通过设备码授权获取）', 400, 'configuration_error')
@@ -194,8 +204,8 @@ export async function handleKimiRequest(p: OAuthCallParams): Promise<Response> {
 
   for (const refreshToken of tokens) {
     try {
-      const accessToken = await getAccessToken(p.env, refreshToken)
-      const upstream = await fetch(`${KIMI_API_BASE}/v1/chat/completions`, {
+      const accessToken = await getAccessToken(p.env, region, refreshToken)
+      const upstream = await fetch(`${region.api}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -268,11 +278,12 @@ async function scanOpenAiStreamUsage(stream: ReadableStream<Uint8Array>, onUsage
 // 后台：连通性测试 / 可用模型
 // =====================================================================
 
-export async function testKimi(env: Env, refreshToken: string, modelId: string): Promise<{ success: boolean; message: string; statusCode?: number }> {
+export async function testKimi(env: Env, refreshToken: string, modelId: string, baseUrl?: string): Promise<{ success: boolean; message: string; statusCode?: number }> {
   if (!refreshToken) return { success: false, message: '未填写 refresh_token', statusCode: 0 }
+  const region = kimiRegion(baseUrl)
   try {
-    const accessToken = await getAccessToken(env, refreshToken)
-    const res = await fetch(`${KIMI_API_BASE}/v1/chat/completions`, {
+    const accessToken = await getAccessToken(env, region, refreshToken)
+    const res = await fetch(`${region.api}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ model: normalizeKimiModel(modelId), messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 }),
@@ -286,10 +297,11 @@ export async function testKimi(env: Env, refreshToken: string, modelId: string):
 }
 
 /** 拉取 Kimi 可用模型（尽力而为：/v1/models 可能不开放） */
-export async function fetchKimiModels(env: Env, refreshToken: string): Promise<{ success: boolean; models: string[]; message?: string }> {
+export async function fetchKimiModels(env: Env, refreshToken: string, baseUrl?: string): Promise<{ success: boolean; models: string[]; message?: string }> {
+  const region = kimiRegion(baseUrl)
   try {
-    const accessToken = await getAccessToken(env, refreshToken)
-    const res = await fetch(`${KIMI_API_BASE}/v1/models`, {
+    const accessToken = await getAccessToken(env, region, refreshToken)
+    const res = await fetch(`${region.api}/v1/models`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(30000),
