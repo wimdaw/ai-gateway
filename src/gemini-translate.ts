@@ -25,7 +25,8 @@ interface GeminiPart {
   text?: string
   thought?: boolean
   inlineData?: { mime_type?: string; mimeType?: string; data?: string }
-  functionCall?: { name?: string; args?: unknown }
+  functionCall?: { id?: string; name?: string; args?: unknown }
+  functionResponse?: { id?: string; name?: string; response?: unknown }
   thoughtSignature?: string
 }
 
@@ -70,7 +71,184 @@ function cleanSchema(schema: unknown): unknown {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
     if (drop.has(k)) continue
+    // properties 的键是属性名(用户数据), 不能当关键字剔除
+    if (k === 'properties' && isPlainObject(v)) {
+      const props: Record<string, unknown> = {}
+      for (const [pk, pv] of Object.entries(v)) props[pk] = cleanSchema(pv)
+      out.properties = props
+      continue
+    }
     out[k] = cleanSchema(v)
+  }
+  return out
+}
+
+// =====================================================================
+// ZCode 兼容模式(zcodeCompat): 编程 Agent 的工具 Schema 常带 Gemini 不支持
+// 的 JSON Schema 关键字, 且 Gemini 3.x 严格校验 required/properties 与
+// functionCall 的 thought_signature。此段逻辑在本地中继上用真实 ZCode
+// 载荷(53 工具)验证过, 移植于此。
+// =====================================================================
+
+export interface GeminiTranslateOptions {
+  /** 开启 ZCode 兼容: 深度清洗工具 Schema + thought_signature 编解码 */
+  zcodeCompat?: boolean
+  /** 上游真实模型 id，用于判断生成配置兼容性（如 gpt-oss 不支持 thinkingConfig） */
+  modelId?: string
+}
+
+/** thought_signature 编码进工具调用 id 的前缀(客户端把 id 视为不透明令牌原样回传) */
+const SIG_ID_PREFIX = 'csg1_'
+
+function encodeSigId(sig: string): string {
+  return SIG_ID_PREFIX + encodeURIComponent(sig)
+}
+
+function decodeSigId(id: string): string | null {
+  if (!id.startsWith(SIG_ID_PREFIX)) return null
+  try { return decodeURIComponent(id.slice(SIG_ID_PREFIX.length)) } catch { return null }
+}
+
+/** zcodeCompat: Gemini Schema proto 不认识的关键字(剔除后语义无损或 Gemini 无法校验) */
+const ZCODE_STRIP = new Set([
+  '$schema', '$id', '$ref', '$defs', 'definitions', '$comment', '$anchor',
+  '$dynamicRef', '$dynamicAnchor', '$vocabulary',
+  'propertyNames', 'patternProperties', 'unevaluatedProperties', 'unevaluatedItems',
+  'contains', 'dependencies', 'dependentSchemas', 'dependentRequired',
+  'if', 'then', 'else', 'not', 'allOf', 'oneOf',
+  'additionalItems', 'prefixItems', 'uniqueItems',
+  'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf',
+  'contentEncoding', 'contentMediaType', 'contentSchema',
+  'title', 'examples', 'example', 'default', 'const',
+  'deprecated', 'readOnly', 'writeOnly', 'additionalProperties',
+])
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** antigravity 渠道上游不接受的 JSON Schema 关键字(实测), 递归剥离:
+ *  - gpt-oss(Vertex 托管开源模型): minItems/maxItems/minLength/maxLength 报 400 invalid argument
+ *  - claude(Vertex Claude): oneOf/anyOf 被判为非法 2020-12 子集, 报 input_schema is invalid
+ *  Gemini 侧容忍这些关键字, 剥离后仅丢失约束提示, 不影响调用语义 */
+const UNSUPPORTED_SCHEMA_KEYS = new Set([
+  'minItems', 'maxItems', 'minLength', 'maxLength',
+  'oneOf', 'anyOf', 'allOf', 'not',
+])
+
+function stripUnsupportedSchemaKeys(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(stripUnsupportedSchemaKeys)
+  if (!isPlainObject(schema)) return schema
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(schema)) {
+    if (UNSUPPORTED_SCHEMA_KEYS.has(k)) continue
+    if (k === 'properties' && isPlainObject(v)) {
+      const props: Record<string, unknown> = {}
+      for (const [pk, pv] of Object.entries(v)) props[pk] = stripUnsupportedSchemaKeys(pv)
+      out.properties = props
+      continue
+    }
+    out[k] = stripUnsupportedSchemaKeys(v)
+  }
+  return out
+}
+
+/** antigravity 渠道各模型流式输出硬上限(实测): 超出后上游报 400 invalid argument
+ *  客户端会把模型声明的 output 上限作为 max_tokens 发来(如 claude 配 128000), 故需按模型钳制 */
+const AG_STREAM_MAX_OUTPUT: Array<[RegExp, number]> = [
+  [/gpt-oss/i, 32768],
+  [/claude/i, 64000],
+  [/gemini/i, 65536],
+]
+
+/** 按模型取流式输出上限, 未匹配的模型不做限制 */
+function streamMaxOutputTokens(modelId?: string): number | undefined {
+  const id = modelId || ''
+  for (const [re, cap] of AG_STREAM_MAX_OUTPUT) if (re.test(id)) return cap
+  return undefined
+}
+
+/** claude(Vertex Claude): 历史里的 thinking 块必须带 thoughtSignature, 否则报
+ *  messages.N.content.0.thinking.signature: Field required。
+ *  签名只能经工具调用 id 携带(csg1_), 纯 thinking 文本无法恢复, 故历史中直接丢弃 */
+function requiresSignedThinking(modelId?: string): boolean {
+  return /claude/i.test(modelId || '')
+}
+
+/**
+ * zcodeCompat: 递归把 JSON Schema 规范化为 Gemini function_declarations 可接受的形状。
+ * - allOf 分支合并进主节点(直接删除会让顶层 required 引用不存在的属性 -> "property is not defined")
+ * - oneOf -> anyOf;type: ["string","null"] -> type + nullable;元组式 items -> anyOf
+ * - 剔除 ZCODE_STRIP 关键字;过滤 required 中不在 properties 里的引用
+ */
+function compatSanitize(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(compatSanitize)
+  if (!isPlainObject(node)) return node
+
+  let merged: Record<string, unknown> = { ...node }
+
+  // allOf 合并(保留分支的 properties/required/items/type/description)
+  if (Array.isArray(merged.allOf)) {
+    const branches = (merged.allOf as unknown[]).map(compatSanitize).filter(isPlainObject)
+    const props = { ...(isPlainObject(merged.properties) ? merged.properties : {}) }
+    const req = new Set(Array.isArray(merged.required) ? (merged.required as unknown[]) : [])
+    let hasProps = isPlainObject(merged.properties)
+    for (const b of branches) {
+      if (isPlainObject(b.properties)) { Object.assign(props, b.properties); hasProps = true }
+      if (Array.isArray(b.required)) for (const r of b.required as unknown[]) req.add(r)
+      if (merged.items === undefined && b.items !== undefined) merged.items = b.items
+      if (merged.type === undefined && b.type !== undefined) merged.type = b.type
+      if (merged.description === undefined && b.description !== undefined) merged.description = b.description
+    }
+    delete merged.allOf
+    if (hasProps) merged.properties = props
+    if (req.size > 0) merged.required = [...req]
+    else delete merged.required
+  }
+
+  // oneOf 在 Gemini proto 中不存在, anyOf 支持
+  if (Array.isArray(merged.oneOf) && merged.anyOf === undefined) merged.anyOf = merged.oneOf
+  delete merged.oneOf
+
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(merged)) {
+    if (ZCODE_STRIP.has(key)) continue
+
+    // properties 的键是用户数据(属性名), 不能当关键字剔除:
+    // 属性名可以就叫 title / default / const, 只清洗它们的 schema 值。
+    if (key === 'properties' && isPlainObject(value)) {
+      const props: Record<string, unknown> = {}
+      for (const [pk, pv] of Object.entries(value)) props[pk] = compatSanitize(pv)
+      out.properties = props
+      continue
+    }
+
+    if (key === 'type' && Array.isArray(value)) {
+      // ["string","null"] -> type + nullable
+      const nonNull = (value as unknown[]).filter((t) => t !== 'null')
+      if ((value as unknown[]).includes('null')) out.nullable = true
+      out.type = nonNull[0] ?? 'string'
+      continue
+    }
+
+    if (key === 'items' && Array.isArray(value)) {
+      // 元组式 items: [schemaA, schemaB] -> anyOf
+      if (out.anyOf === undefined) out.anyOf = (value as unknown[]).map(compatSanitize)
+      continue
+    }
+
+    out[key] = isPlainObject(value) || Array.isArray(value) ? compatSanitize(value) : value
+  }
+
+  if (out.type === undefined && isPlainObject(out.properties)) out.type = 'object'
+  if (out.type === undefined && isPlainObject(out.items)) out.type = 'array'
+
+  // Gemini 校验 required 必须都在 properties 中
+  if (Array.isArray(out.required)) {
+    const known = isPlainObject(out.properties) ? out.properties : {}
+    const filtered = (out.required as unknown[]).filter((r) => typeof r === 'string' && r in known)
+    if (filtered.length > 0) out.required = filtered
+    else delete out.required
   }
   return out
 }
@@ -118,7 +296,7 @@ function contentToParts(content: unknown): GeminiPart[] {
   return parts
 }
 
-function generationConfigFrom(body: Record<string, any>): Record<string, unknown> {
+function generationConfigFrom(body: Record<string, any>, zcodeCompat?: boolean, modelId?: string): Record<string, unknown> {
   const cfg: Record<string, unknown> = {}
   const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
   const temperature = num(body.temperature)
@@ -128,17 +306,24 @@ function generationConfigFrom(body: Record<string, any>): Record<string, unknown
   if (temperature !== undefined) cfg.temperature = temperature
   if (topP !== undefined) cfg.topP = topP
   if (topK !== undefined) cfg.topK = topK
-  if (maxTokens !== undefined) cfg.maxOutputTokens = maxTokens
+  if (maxTokens !== undefined) {
+    const cap = streamMaxOutputTokens(modelId)
+    cfg.maxOutputTokens = cap !== undefined ? Math.min(maxTokens, cap) : maxTokens
+  }
   const n = num(body.n)
   if (n !== undefined && n > 1) cfg.candidateCount = n
 
   // reasoning_effort -> thinkingConfig
-  const effort = body.reasoning_effort
-  if (typeof effort === 'number') {
-    cfg.thinkingConfig = { thinkingBudget: effort }
-  } else if (typeof effort === 'string' && effort.trim()) {
-    const e = effort.trim().toLowerCase()
-    cfg.thinkingConfig = e === 'auto' ? { thinkingBudget: -1 } : { thinkingLevel: e }
+  // gpt-oss 等托管开源模型不接受 thinkingConfig(上游报 400 invalid argument),
+  // 其推理档位已由模型名后缀(-low/-medium/-high)表达, 跳过该映射
+  if (!/gpt-oss/i.test(modelId || '')) {
+    const effort = body.reasoning_effort
+    if (typeof effort === 'number') {
+      cfg.thinkingConfig = { thinkingBudget: effort }
+    } else if (typeof effort === 'string' && effort.trim()) {
+      const e = effort.trim().toLowerCase()
+      cfg.thinkingConfig = e === 'auto' ? { thinkingBudget: -1 } : { thinkingLevel: e }
+    }
   }
 
   // response_format -> responseMimeType / responseSchema
@@ -150,7 +335,7 @@ function generationConfigFrom(body: Record<string, any>): Record<string, unknown
     } else if (type === 'json_schema') {
       cfg.responseMimeType = 'application/json'
       const schema = (rf as any).json_schema?.schema
-      if (schema) cfg.responseSchema = cleanSchema(schema)
+      if (schema) cfg.responseSchema = zcodeCompat ? compatSanitize(schema) : cleanSchema(schema)
     }
   }
   return cfg
@@ -174,7 +359,7 @@ function toolConfigFrom(body: Record<string, any>): Record<string, unknown> | un
   return undefined
 }
 
-function toolsFrom(body: Record<string, any>, nameMap: Record<string, string>): unknown[] | undefined {
+function toolsFrom(body: Record<string, any>, nameMap: Record<string, string>, zcodeCompat?: boolean): unknown[] | undefined {
   const tools = body.tools
   if (!Array.isArray(tools) || tools.length === 0) return undefined
   const declarations: Record<string, unknown>[] = []
@@ -187,7 +372,10 @@ function toolsFrom(body: Record<string, any>, nameMap: Record<string, string>): 
       if (sanitized !== original) nameMap[sanitized] = original
       const decl: Record<string, unknown> = { name: sanitized }
       if (tt.function.description) decl.description = String(tt.function.description)
-      if (tt.function.parameters) decl.parameters = cleanSchema(tt.function.parameters)
+      if (tt.function.parameters) {
+        const cleaned = zcodeCompat ? compatSanitize(tt.function.parameters) : cleanSchema(tt.function.parameters)
+        decl.parameters = stripUnsupportedSchemaKeys(cleaned)
+      }
       declarations.push(decl)
     }
   }
@@ -208,9 +396,10 @@ interface TranslatedRequest {
 }
 
 /** OpenAI Chat Completions 请求体 -> Gemini 请求体（含 tools / 多模态 / 工具调用） */
-export function openAIToGeminiRequest(body: Record<string, any>): TranslatedRequest {
+export function openAIToGeminiRequest(body: Record<string, any>, opts?: GeminiTranslateOptions): TranslatedRequest {
   const messages: any[] = Array.isArray(body.messages) ? body.messages : []
   const nameMap: Record<string, string> = {}
+  const zcodeCompat = !!opts?.zcodeCompat
 
   // 第一遍：assistant.tool_calls 的 id -> 原始函数名
   const id2name = new Map<string, string>()
@@ -248,7 +437,7 @@ export function openAIToGeminiRequest(body: Record<string, any>): TranslatedRequ
     if (role === 'assistant') {
       encounteredConversation = true
       const parts: GeminiPart[] = []
-      if (typeof m.reasoning_content === 'string' && m.reasoning_content) {
+      if (!requiresSignedThinking(opts?.modelId) && typeof m.reasoning_content === 'string' && m.reasoning_content) {
         parts.push({ text: m.reasoning_content, thought: true })
       }
       parts.push(...contentToParts(m.content))
@@ -266,7 +455,16 @@ export function openAIToGeminiRequest(body: Record<string, any>): TranslatedRequ
         } catch {
           args = {}
         }
-        parts.push({ functionCall: { name: sanitized, args } })
+        const part: GeminiPart = { functionCall: { name: sanitized, args } }
+        // zcodeCompat: 从客户端回传的工具调用 id 里解码 thought_signature, 附加到 functionCall
+        const sig = zcodeCompat && typeof tc.id === 'string' ? decodeSigId(tc.id) : null
+        if (sig) {
+          part.thoughtSignature = sig
+        } else if (typeof tc.id === 'string' && tc.id) {
+          // 非签名 id 原样回传: claude / gpt-oss 上游要求 tool_use 必须带 id
+          part.functionCall!.id = tc.id
+        }
+        parts.push(part)
       }
       if (parts.length > 0) contents.push({ role: 'model', parts })
 
@@ -277,13 +475,18 @@ export function openAIToGeminiRequest(body: Record<string, any>): TranslatedRequ
           if (tc?.type !== 'function') continue
           const original = id2name.get(String(tc.id)) || String(tc.function?.name || '')
           if (!original) continue
-          const toolMsg = messages.find((x) => x?.role === 'tool' && String(x.tool_call_id) === String(tc.id))
-          if (toolMsg) handledToolIds.add(String(tc.id))
-          const raw = toolMsg ? toolMsg.content : '{}'
-          const result = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {})
-          responseParts.push({
-            functionResponse: { name: sanitizeToolName(original), response: { result } },
-          } as unknown as GeminiPart)
+        const toolMsg = messages.find((x) => x?.role === 'tool' && String(x.tool_call_id) === String(tc.id))
+        if (toolMsg) handledToolIds.add(String(tc.id))
+        const raw = toolMsg ? toolMsg.content : '{}'
+        const result = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {})
+        const respPart: GeminiPart = {
+          functionResponse: { name: sanitizeToolName(original), response: { result } },
+        }
+        // 与 functionCall 配对: 非签名 id 需要一并回传, 上游据此关联 tool_use / tool_result
+        if (typeof tc.id === 'string' && tc.id && !(zcodeCompat && decodeSigId(tc.id))) {
+          respPart.functionResponse!.id = tc.id
+        }
+        responseParts.push(respPart as unknown as GeminiPart)
         }
         if (responseParts.length > 0) contents.push({ role: 'user', parts: responseParts })
       }
@@ -296,10 +499,9 @@ export function openAIToGeminiRequest(body: Record<string, any>): TranslatedRequ
       const name = sanitizeToolName(String(m.name || 'tool'))
       const raw = m.content
       const result = typeof raw === 'string' ? raw : JSON.stringify(raw ?? {})
-      contents.push({
-        role: 'user',
-        parts: [{ functionResponse: { name, response: { result } } } as unknown as GeminiPart],
-      })
+      const orphan: GeminiPart = { functionResponse: { name, response: { result } } }
+      if (typeof m.tool_call_id === 'string' && m.tool_call_id) orphan.functionResponse!.id = m.tool_call_id
+      contents.push({ role: 'user', parts: [orphan as unknown as GeminiPart] })
     }
   }
 
@@ -310,9 +512,9 @@ export function openAIToGeminiRequest(body: Record<string, any>): TranslatedRequ
 
   const request: Record<string, unknown> = { contents }
   if (systemParts.length > 0) request.systemInstruction = { role: 'user', parts: systemParts }
-  const generationConfig = generationConfigFrom(body)
+  const generationConfig = generationConfigFrom(body, zcodeCompat, opts?.modelId)
   if (Object.keys(generationConfig).length > 0) request.generationConfig = generationConfig
-  const tools = toolsFrom(body, nameMap)
+  const tools = toolsFrom(body, nameMap, zcodeCompat)
   if (tools) request.tools = tools
   const toolConfig = toolConfigFrom(body)
   if (toolConfig) request.toolConfig = toolConfig
@@ -385,7 +587,9 @@ export function geminiResponseToOpenAI(
   body: unknown,
   requestedModel: string,
   nameMap: Record<string, string>,
+  opts?: GeminiTranslateOptions,
 ): Record<string, unknown> {
+  const zcodeCompat = !!opts?.zcodeCompat
   const data = unwrap(body)
   const candidate = Array.isArray(data.candidates) ? data.candidates[0] : undefined
   const parts: GeminiPart[] = candidate?.content?.parts || []
@@ -408,8 +612,13 @@ export function geminiResponseToOpenAI(
       } catch {
         args = '{}'
       }
+      // zcodeCompat: thought_signature 编码进 id, 客户端原样回传后由请求侧解码;
+      // 无签名时优先沿用上游自己的 id(claude/gpt-oss 要求 id 前后一致)
+      const id = zcodeCompat && part.thoughtSignature
+        ? encodeSigId(part.thoughtSignature)
+        : (part.functionCall.id || `call_${randomId().replace(/-/g, '').slice(0, 24)}`)
       toolCalls.push({
-        id: `call_${randomId().replace(/-/g, '').slice(0, 24)}`,
+        id,
         type: 'function',
         function: { name, arguments: args },
       })
@@ -445,7 +654,9 @@ export function createOpenAIStream(
   nameMap: Record<string, string>,
   onUsage: (u: GeminiUsage) => void,
   onEnd?: (u: GeminiUsage) => void,
+  opts?: GeminiTranslateOptions,
 ): ReadableStream<Uint8Array> {
+  const zcodeCompat = !!opts?.zcodeCompat
   const decoder = new TextDecoder()
   const encoder = new TextEncoder()
   let buffer = ''
@@ -505,11 +716,16 @@ export function createOpenAIStream(
         } catch {
           args = '{}'
         }
+        // zcodeCompat: thought_signature 编码进 id, 客户端原样回传后由请求侧解码;
+        // 无签名时优先沿用上游自己的 id(claude/gpt-oss 要求 id 前后一致)
+        const id = zcodeCompat && part.thoughtSignature
+          ? encodeSigId(part.thoughtSignature)
+          : (part.functionCall.id || `call_${randomId().replace(/-/g, '').slice(0, 24)}`)
         emitDelta(controller, {
           tool_calls: [
             {
               index: toolIndex++,
-              id: `call_${randomId().replace(/-/g, '').slice(0, 24)}`,
+              id,
               type: 'function',
               function: { name, arguments: args },
             },

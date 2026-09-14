@@ -69,7 +69,12 @@ app.get('/admin/logout', handleLogout)
 // ===== 管理后台（需 Session 验证） =====
 app.use('/admin/*', adminAuthMiddleware)
 
-app.get('/admin', async (c) => renderAdminPage(c))
+app.get('/admin', async (c) => {
+  const res = await renderAdminPage(c)
+  // 管理页含内联脚本, 禁止缓存以免浏览器长期使用旧版界面
+  res.headers.set('Cache-Control', 'no-store, must-revalidate')
+  return res
+})
 
 // 系统状态
 app.get('/admin/api/status', handleStatus)

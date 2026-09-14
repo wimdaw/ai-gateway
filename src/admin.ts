@@ -159,6 +159,7 @@ apiKeys: normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true })),
       : [],
     mirrorUrls: normalizeMirrorUrls(body.mirrorUrls),
     project: body.project,
+    zcodeCompat: !!body.zcodeCompat,
     voice: body.voice,
     rate: body.rate,
     volume: body.volume,
@@ -188,6 +189,7 @@ export async function handleUpdateProvider(c: Context<{ Bindings: Env }>) {
   if (body.pitch !== undefined) updates.pitch = body.pitch
   if (body.mirrorUrls !== undefined) updates.mirrorUrls = normalizeMirrorUrls(body.mirrorUrls)
   if (body.project !== undefined) updates.project = body.project
+  if (body.zcodeCompat !== undefined) updates.zcodeCompat = !!body.zcodeCompat
 if (body.apiKeys !== undefined) {
     updates.apiKeys = normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true }))
   }
@@ -627,23 +629,24 @@ export async function handleOAuthPoll(c: Context<{ Bindings: Env }>) {
     return c.json<ApiResponse>({ success: false, message: 'state 为必填项' }, 400)
   }
   try {
-    if (provider === 'kimi') {
-      const r = await pollKimiDeviceFlow(c.env, state)
-      return c.json<ApiResponse<OAuthPollResult>>({ success: true, data: r })
+    const r = provider === 'kimi'
+      ? await pollKimiDeviceFlow(c.env, state)
+      : provider === 'qwen'
+        ? await pollQwenDeviceFlow(c.env, state)
+        : provider === 'grok'
+          ? await pollGrokDeviceFlow(c.env, state)
+          : null
+    if (!r) {
+      return c.json<ApiResponse>({ success: false, message: `${provider} 渠道使用授权链接，请用 complete 接口` }, 400)
     }
-    if (provider === 'qwen') {
-      const r = await pollQwenDeviceFlow(c.env, state)
-      return c.json<ApiResponse<OAuthPollResult>>({ success: true, data: r })
-    }
-    if (provider === 'grok') {
-      const r = await pollGrokDeviceFlow(c.env, state)
-      return c.json<ApiResponse<OAuthPollResult>>({ success: true, data: r })
-    }
-    return c.json<ApiResponse>({ success: false, message: `${provider} 渠道使用授权链接，请用 complete 接口` }, 400)
+    // 前端按 refresh_token 读取(claude/codex 的 complete 接口也是这个命名), 这里两种都给出, 避免字段名不一致导致静默不收尾
+    const data = { ...r, refresh_token: r.refreshToken } as OAuthPollResult & { refresh_token?: string }
+    return c.json<ApiResponse<OAuthPollResult>>({ success: true, data })
   } catch (err) {
     return c.json<ApiResponse>({ success: false, message: (err as Error).message || '轮询失败' }, 500)
   }
 }
+
 
 /** 拉取可用模型（claude / kimi，凭据为 refresh_token） */
 export async function handleOAuthModels(c: Context<{ Bindings: Env }>) {

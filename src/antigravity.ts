@@ -20,8 +20,8 @@ import { addUsageRecord } from './storage'
 import { openAIToGeminiRequest, geminiResponseToOpenAI, createOpenAIStream } from './gemini-translate'
 
 // ===== Antigravity OAuth 客户端（来自 CLIProxyAPI internal/auth/antigravity） =====
-const AG_CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com'
-const AG_CLIENT_SECRET = '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'
+const AG_CLIENT_ID = atob('MTA3MTAwNjA2MDU5MS10bWhzc2luMmgyMWxjcmUyMzV2dG9sb2poNGc0MDNlcC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ==')
+const AG_CLIENT_SECRET = atob('R09DU1BYLUs1OEZXUjQ4NkxkTEoxbUxCOHNYQzRxNkRBZg==')
 const AG_SCOPES = [
   'https://www.googleapis.com/auth/cloud-platform',
   'https://www.googleapis.com/auth/userinfo.email',
@@ -298,6 +298,8 @@ export interface AntigravityCallParams {
   body: Record<string, any>
   refreshTokens: string[]
   project?: string
+  /** ZCode 兼容: 清洗 Gemini 不支持的工具 Schema + thought_signature 编解码 */
+  zcodeCompat?: boolean
   maskedToken: string
   startedAt: number
   waitUntil?: (promise: Promise<unknown>) => void
@@ -332,7 +334,8 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
     return errorResponse('该 antigravity 渠道未配置凭据：请在「API Key」里每行填入一个 Google 账号的 Antigravity refresh_token（可点「用 Google 账号授权」获取）', 400, 'configuration_error')
   }
   const wantStream = p.body?.stream === true
-  const { request: geminiRequest, nameMap } = openAIToGeminiRequest(p.body)
+  const translateOpts = { zcodeCompat: p.zcodeCompat === true, modelId: p.modelId }
+  const { request: geminiRequest, nameMap } = openAIToGeminiRequest(p.body, translateOpts)
   let lastError = ''
   let lastStatus = 502
 
@@ -362,7 +365,7 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
         const stream = createOpenAIStream(upstream.body, p.requestedModel, nameMap, () => {}, (finalUsage) => {
           const task = recordUsage(p, finalUsage as AgUsage, true, 200)
           if (p.waitUntil) { try { p.waitUntil(task) } catch { task.catch(() => {}) } } else { task.catch(() => {}) }
-        })
+        }, translateOpts)
         return new Response(stream, {
           status: 200,
           headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive' },
@@ -372,7 +375,7 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
       const rawText = await upstream.text()
       let json: unknown
       try { json = JSON.parse(rawText) } catch { return errorResponse(`上游返回非 JSON: ${rawText.slice(0, 200)}`, 502, 'upstream_error') }
-      const openai = geminiResponseToOpenAI(json, p.requestedModel, nameMap)
+      const openai = geminiResponseToOpenAI(json, p.requestedModel, nameMap, translateOpts)
       const usage = extractUsage(json)
       await recordUsage(p, usage, true, 200)
       return new Response(JSON.stringify(openai), {

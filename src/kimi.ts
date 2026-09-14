@@ -37,6 +37,9 @@ function kimiRegion(baseUrl?: string): { auth: string; api: string } {
 
 const AT_PREFIX = 'kimi:at:'
 const DEVICE_PREFIX = 'kimi:device:'
+/** 设备码有效期(分钟), 上游返回 expires_in(实测 1800s), 仅用于提示文案 */
+const KIMI_DEVICE_TTL_MIN = 30
+
 
 // ===== 设备码流程请求头（与 CLIProxyAPI 一致） =====
 function mshHeaders(deviceId: string): Record<string, string> {
@@ -79,11 +82,18 @@ export async function startKimiDeviceFlow(env: Env, baseUrl?: string): Promise<K
   try { json = JSON.parse(text) } catch { throw new Error(`设备码请求返回非 JSON: ${text.slice(0, 200)}`) }
   if (!res.ok || !json.device_code) throw new Error(`设备码请求失败 HTTP ${res.status}: ${text.slice(0, 300)}`)
   const state = randomId()
-  await getKV(env).put(DEVICE_PREFIX + state, JSON.stringify({
-    deviceCode: json.device_code,
-    deviceId,
-    auth: region.auth,
-  }), { expirationTtl: Math.max(300, Number(json.expires_in) || 900) }).catch(() => {})
+  try {
+    await getKV(env).put(DEVICE_PREFIX + state, JSON.stringify({
+      deviceCode: json.device_code,
+      deviceId,
+      auth: region.auth,
+    }), { expirationTtl: Math.max(300, Number(json.expires_in) || 900) })
+    console.log('[kimi] start stored', state.slice(0, 8), 'expires_in=', json.expires_in)
+  } catch (e) {
+    // 存不上会话后续轮询必然报「会话不存在」, 这里不再静默
+    console.error('[kimi] start store failed', state.slice(0, 8), String(e))
+    throw new Error('设备码会话写入失败(存储异常)，请重试')
+  }
   return {
     state,
     verificationUri: String(json.verification_uri || 'https://auth.kimi.com/device'),
@@ -102,8 +112,16 @@ export interface KimiPollResult {
 
 export async function pollKimiDeviceFlow(env: Env, state: string): Promise<KimiPollResult> {
   const raw = await getKV(env).get(DEVICE_PREFIX + state)
-  if (!raw) return { status: 'error', message: '设备码会话不存在或已过期，请重新发起授权' }
-  const { deviceCode, deviceId, auth } = JSON.parse(raw) as { deviceCode: string; deviceId: string; auth?: string }
+  if (!raw) {
+    console.log('[kimi] poll miss', state.slice(0, 8))
+    return { status: 'error', message: '设备码会话不存在或已过期，请重新发起授权' }
+  }
+  const session = JSON.parse(raw) as { deviceCode: string; deviceId: string; auth?: string; done?: boolean; refreshToken?: string }
+  // 幂等：已换取成功过的会话直接复用结果，避免「响应丢失后重试 -> 误报会话不存在」导致 token 丢失
+  if (session.done && session.refreshToken) {
+      return { status: 'ok', refreshToken: session.refreshToken }
+  }
+  const { deviceCode, deviceId, auth } = session
   const form = new URLSearchParams({
     client_id: KIMI_CLIENT_ID,
     device_code: deviceCode,
@@ -119,10 +137,11 @@ export async function pollKimiDeviceFlow(env: Env, state: string): Promise<KimiP
   let json: any
   try { json = JSON.parse(text) } catch { return { status: 'error', message: `轮询返回非 JSON: ${text.slice(0, 200)}` } }
   if (json.error) {
+    console.log('[kimi] poll upstream', state.slice(0, 8), json.error)
     if (json.error === 'authorization_pending' || json.error === 'slow_down') return { status: 'pending' }
     if (json.error === 'expired_token') {
       await getKV(env).delete(DEVICE_PREFIX + state).catch(() => {})
-      return { status: 'error', message: '设备码已过期，请重新发起授权' }
+      return { status: 'error', message: `设备码已过期（有效期 ${KIMI_DEVICE_TTL_MIN} 分钟），请重新发起授权` }
     }
     if (json.error === 'access_denied') {
       await getKV(env).delete(DEVICE_PREFIX + state).catch(() => {})
@@ -132,7 +151,11 @@ export async function pollKimiDeviceFlow(env: Env, state: string): Promise<KimiP
   }
   if (!json.access_token) return { status: 'error', message: 'Kimi 未返回 access_token' }
   if (!json.refresh_token) return { status: 'error', message: 'Kimi 未返回 refresh_token，请重新授权' }
-  await getKV(env).delete(DEVICE_PREFIX + state).catch(() => {})
+  // 标记完成并保留结果（不删除）：后续重复轮询仍返回同一 refresh_token
+  await getKV(env).put(DEVICE_PREFIX + state, JSON.stringify({
+    deviceCode, deviceId, auth, done: true, refreshToken: json.refresh_token,
+  }), { expirationTtl: 3600 }).catch(() => {})
+  console.log('[kimi] poll ok', state.slice(0, 8))
   return { status: 'ok', refreshToken: json.refresh_token }
 }
 

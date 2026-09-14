@@ -7,6 +7,7 @@ AI 渠道 API 代理网关 — 统一 `/v1` 接口转发，支持多上游渠道
 ## 功能特性
 
 - **多渠道转发** — OpenAI 兼容 / Anthropic 兼容 / Azure TTS / Agnes 视频 / Antigravity 反代，统一 `/v1` 入口
+- **ZCode 兼容模式** — Antigravity 渠道可开启：清洗 Gemini 不支持的工具 Schema 并回传 `thought_signature`，编程 Agent 直连可用
 - **免费模型默认启用** — OpenCode、Kilo 免费模型开箱即用，无需配置 API Key
 - **后台管理** — 渠道管理、令牌管理、用量统计、模型排行
 - **D1 存储** — 配置/会话/用量全部存储在 Cloudflare D1，KV 作可选回退
@@ -132,10 +133,17 @@ CLIProxyAPI 的 Antigravity 反代：Antigravity OAuth → `cloudcode-pa` 的 `v
      后面那一段（或整段地址）粘回弹窗，网关自动换取 refresh_token 并填入 API Keys。
    - **获取模型列表**：点 **「获取模型列表」** 会用该凭据拉取 Antigravity 可用模型名，追加到模型列表。
    - **GCP 项目 ID**：无需填写，网关自动 `loadCodeAssist` / `onboardUser` 解析。
+   - **ZCode 兼容**：编程 Agent（ZCode / Claude Code 等）请开启。开启后网关深度清洗工具 Schema
+     （合并 `allOf`、`oneOf` → `anyOf`、`type: ["string","null"]` → `nullable`、剔除 `propertyNames`
+     等 Gemini 不支持的关键字、过滤悬空的 `required`），并捕获/回传 Gemini 的 `thought_signature`
+     以支持多轮工具调用历史。关闭时保持原有翻译行为。
 2. 保存后在渠道里对模型点插头图标测试连通性。
 
 > 模型名以「获取模型列表」返回的为准（例如 `gemini-3.5-flash`、`claude-sonnet-4-6` 等）。
 > 网关不做白名单，填什么就透传什么，名字不对上游会报错。
+>
+> 在 ZCode 里作为「OpenAI 兼容」供应商接入：Base URL 填 `https://<网关域名>/v1`，
+> 模型填 `<渠道ID>/<模型ID>`（如 `antigravity/gemini-3.5-flash`），API Key 填网关令牌。
 
 ## OAuth 反代渠道（`claude` / `codex` / `kimi` / `grok`）
 
