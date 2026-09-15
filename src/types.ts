@@ -28,8 +28,6 @@ export interface Provider {
   mirrorUrls?: string[]
   /** GCP 项目 ID(仅 type=antigravity 使用; 一般留空由网关自动解析) */
   project?: string
-  /** ZCode 兼容(仅 type=antigravity 使用): 清洗 Gemini 不支持的工具 Schema 关键字并回传 thought_signature, 让 ZCode 等编程 Agent 直连使用 */
-  zcodeCompat?: boolean
   /** Azure TTS 音色配置(仅 type=azure-tts 使用) */
   voice?: string
   rate?: string
@@ -117,7 +115,6 @@ export interface CreateProviderRequest {
   models?: Array<{ id: string; enabled: boolean }> | string[]
   mirrorUrls?: string[] | string
   project?: string
-  zcodeCompat?: boolean
   voice?: string
   rate?: string
   volume?: string
@@ -134,7 +131,6 @@ export interface UpdateProviderRequest {
   models?: Array<{ id: string; enabled: boolean }> | string[]
   mirrorUrls?: string[] | string
   project?: string
-  zcodeCompat?: boolean
   voice?: string
   rate?: string
   volume?: string

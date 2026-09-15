@@ -159,7 +159,6 @@ apiKeys: normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true })),
       : [],
     mirrorUrls: normalizeMirrorUrls(body.mirrorUrls),
     project: body.project,
-    zcodeCompat: !!body.zcodeCompat,
     voice: body.voice,
     rate: body.rate,
     volume: body.volume,
@@ -189,7 +188,6 @@ export async function handleUpdateProvider(c: Context<{ Bindings: Env }>) {
   if (body.pitch !== undefined) updates.pitch = body.pitch
   if (body.mirrorUrls !== undefined) updates.mirrorUrls = normalizeMirrorUrls(body.mirrorUrls)
   if (body.project !== undefined) updates.project = body.project
-  if (body.zcodeCompat !== undefined) updates.zcodeCompat = !!body.zcodeCompat
 if (body.apiKeys !== undefined) {
     updates.apiKeys = normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true }))
   }

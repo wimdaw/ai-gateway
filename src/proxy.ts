@@ -396,7 +396,6 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
         body: body as Record<string, any>,
         refreshTokens: enabledKeys.map((k) => k.key),
         project: provider.project,
-        zcodeCompat: provider.zcodeCompat === true,
         maskedToken,
         startedAt,
         waitUntil: (promise) => {

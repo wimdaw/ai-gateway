@@ -303,8 +303,6 @@ export interface AntigravityCallParams {
   body: Record<string, any>
   refreshTokens: string[]
   project?: string
-  /** ZCode 兼容: 清洗 Gemini 不支持的工具 Schema + thought_signature 编解码 */
-  zcodeCompat?: boolean
   maskedToken: string
   startedAt: number
   waitUntil?: (promise: Promise<unknown>) => void
@@ -339,7 +337,7 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
     return errorResponse('该 antigravity 渠道未配置凭据：请在「API Key」里每行填入一个 Google 账号的 Antigravity refresh_token（可点「用 Google 账号授权」获取）', 400, 'configuration_error')
   }
   const wantStream = p.body?.stream === true
-  const translateOpts = { zcodeCompat: p.zcodeCompat === true, modelId: p.modelId }
+  const translateOpts = { modelId: p.modelId }
   const { request: geminiRequest, nameMap } = openAIToGeminiRequest(p.body, translateOpts)
   let lastError = ''
   let lastStatus = 502

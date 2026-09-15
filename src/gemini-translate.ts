@@ -84,15 +84,13 @@ function cleanSchema(schema: unknown): unknown {
 }
 
 // =====================================================================
-// ZCode 兼容模式(zcodeCompat): 编程 Agent 的工具 Schema 常带 Gemini 不支持
-// 的 JSON Schema 关键字, 且 Gemini 3.x 严格校验 required/properties 与
-// functionCall 的 thought_signature。此段逻辑在本地中继上用真实 ZCode
-// 载荷(53 工具)验证过, 移植于此。
+// 编程 Agent(如 ZCode / Claude Code)兼容处理, 默认开启:
+// Agent 的工具 Schema 常带 Gemini / Vertex 上游不接受的 JSON Schema 关键字,
+// 且 Gemini 3.x 严格校验 required/properties 与 functionCall 的 thought_signature。
+// 此段逻辑在本地中继与线上渠道上用真实 ZCode 载荷(53 工具)验证过。
 // =====================================================================
 
 export interface GeminiTranslateOptions {
-  /** 开启 ZCode 兼容: 深度清洗工具 Schema + thought_signature 编解码 */
-  zcodeCompat?: boolean
   /** 上游真实模型 id，用于判断生成配置兼容性（如 gpt-oss 不支持 thinkingConfig） */
   modelId?: string
 }
@@ -109,7 +107,7 @@ function decodeSigId(id: string): string | null {
   try { return decodeURIComponent(id.slice(SIG_ID_PREFIX.length)) } catch { return null }
 }
 
-/** zcodeCompat: Gemini Schema proto 不认识的关键字(剔除后语义无损或 Gemini 无法校验) */
+/** Gemini Schema proto 不认识的关键字(剔除后语义无损或 Gemini 无法校验) */
 const ZCODE_STRIP = new Set([
   '$schema', '$id', '$ref', '$defs', 'definitions', '$comment', '$anchor',
   '$dynamicRef', '$dynamicAnchor', '$vocabulary',
@@ -153,12 +151,16 @@ function stripUnsupportedSchemaKeys(schema: unknown): unknown {
   return out
 }
 
-/** antigravity 渠道各模型流式输出硬上限(实测): 超出后上游报 400 invalid argument
- *  客户端会把模型声明的 output 上限作为 max_tokens 发来(如 claude 配 128000), 故需按模型钳制 */
+/** antigravity 渠道各模型流式输出硬上限(实测): 超出后上游报 400 invalid argument。
+ *  客户端会把模型声明的 output 上限作为 max_tokens 发来(如 128000), 故按模型钳制:
+ *  - gpt-oss(Vertex 托管开源模型): 32768
+ *  - 3.6/3.7/3.8 系列与 3-flash / 3.1-flash-image: 65536
+ *  - 其余(claude、2.5 系列、3.1/3.5 的 lite 与 pro、pro-agent): 64000 */
 const AG_STREAM_MAX_OUTPUT: Array<[RegExp, number]> = [
   [/gpt-oss/i, 32768],
-  [/claude/i, 64000],
-  [/gemini/i, 65536],
+  [/gemini-3\.(6|7|8)-flash/i, 65536],
+  [/gemini-3-flash|gemini-3\.1-flash-image/i, 65536],
+  [/claude|gemini/i, 64000],
 ]
 
 /** 按模型取流式输出上限, 未匹配的模型不做限制 */
@@ -176,7 +178,7 @@ function requiresSignedThinking(modelId?: string): boolean {
 }
 
 /**
- * zcodeCompat: 递归把 JSON Schema 规范化为 Gemini function_declarations 可接受的形状。
+ * 递归把 JSON Schema 规范化为 Gemini function_declarations 可接受的形状。
  * - allOf 分支合并进主节点(直接删除会让顶层 required 引用不存在的属性 -> "property is not defined")
  * - oneOf -> anyOf;type: ["string","null"] -> type + nullable;元组式 items -> anyOf
  * - 剔除 ZCODE_STRIP 关键字;过滤 required 中不在 properties 里的引用
@@ -296,7 +298,7 @@ function contentToParts(content: unknown): GeminiPart[] {
   return parts
 }
 
-function generationConfigFrom(body: Record<string, any>, zcodeCompat?: boolean, modelId?: string): Record<string, unknown> {
+function generationConfigFrom(body: Record<string, any>, modelId?: string): Record<string, unknown> {
   const cfg: Record<string, unknown> = {}
   const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
   const temperature = num(body.temperature)
@@ -335,7 +337,7 @@ function generationConfigFrom(body: Record<string, any>, zcodeCompat?: boolean, 
     } else if (type === 'json_schema') {
       cfg.responseMimeType = 'application/json'
       const schema = (rf as any).json_schema?.schema
-      if (schema) cfg.responseSchema = zcodeCompat ? compatSanitize(schema) : cleanSchema(schema)
+      if (schema) cfg.responseSchema = compatSanitize(schema)
     }
   }
   return cfg
@@ -359,7 +361,7 @@ function toolConfigFrom(body: Record<string, any>): Record<string, unknown> | un
   return undefined
 }
 
-function toolsFrom(body: Record<string, any>, nameMap: Record<string, string>, zcodeCompat?: boolean): unknown[] | undefined {
+function toolsFrom(body: Record<string, any>, nameMap: Record<string, string>): unknown[] | undefined {
   const tools = body.tools
   if (!Array.isArray(tools) || tools.length === 0) return undefined
   const declarations: Record<string, unknown>[] = []
@@ -373,7 +375,7 @@ function toolsFrom(body: Record<string, any>, nameMap: Record<string, string>, z
       const decl: Record<string, unknown> = { name: sanitized }
       if (tt.function.description) decl.description = String(tt.function.description)
       if (tt.function.parameters) {
-        const cleaned = zcodeCompat ? compatSanitize(tt.function.parameters) : cleanSchema(tt.function.parameters)
+        const cleaned = compatSanitize(tt.function.parameters)
         decl.parameters = stripUnsupportedSchemaKeys(cleaned)
       }
       declarations.push(decl)
@@ -399,17 +401,16 @@ interface TranslatedRequest {
 export function openAIToGeminiRequest(body: Record<string, any>, opts?: GeminiTranslateOptions): TranslatedRequest {
   const messages: any[] = Array.isArray(body.messages) ? body.messages : []
   const nameMap: Record<string, string> = {}
-  const zcodeCompat = !!opts?.zcodeCompat
 
-  // claude / gpt-oss 上游把 functionCall 翻成 tool_use 时强制要求带 id; 而 zcodeCompat 下
-  // 客户端回传的 csg1_* id 承载的是 thought_signature(已单独回填), 不能兼作 tool_use.id,
+  // claude / gpt-oss 上游把 functionCall 翻成 tool_use 时强制要求带 id; 而客户端回传的
+  // csg1_* id 承载的是 thought_signature(已单独回填), 不能兼作 tool_use.id,
   // 故为这类 id 生成配对替代 id。Gemini 上游不需要 id, 保持原行为不做回填。
   const needsToolId = /claude|gpt-oss/i.test(opts?.modelId || '')
   const altToolIds = new Map<string, string>()
   let altToolSeq = 0
   const upstreamToolId = (rawId: unknown): string | undefined => {
     if (typeof rawId !== 'string' || !rawId) return undefined
-    const sig = zcodeCompat ? decodeSigId(rawId) : null
+    const sig = decodeSigId(rawId)
     if (!sig) return rawId
     if (!needsToolId) return undefined
     let id = altToolIds.get(rawId)
@@ -476,8 +477,8 @@ export function openAIToGeminiRequest(body: Record<string, any>, opts?: GeminiTr
           args = {}
         }
         const part: GeminiPart = { functionCall: { name: sanitized, args } }
-        // zcodeCompat: 从客户端回传的工具调用 id 里解码 thought_signature, 附加到 functionCall
-        const sig = zcodeCompat && typeof tc.id === 'string' ? decodeSigId(tc.id) : null
+        // 从客户端回传的工具调用 id 里解码 thought_signature, 附加到 functionCall
+        const sig = typeof tc.id === 'string' ? decodeSigId(tc.id) : null
         if (sig) part.thoughtSignature = sig
         // claude / gpt-oss 上游要求 tool_use 必须带 id(签名占用原 id 时用配对替代 id)
         const toolId = upstreamToolId(tc.id)
@@ -529,9 +530,9 @@ export function openAIToGeminiRequest(body: Record<string, any>, opts?: GeminiTr
 
   const request: Record<string, unknown> = { contents }
   if (systemParts.length > 0) request.systemInstruction = { role: 'user', parts: systemParts }
-  const generationConfig = generationConfigFrom(body, zcodeCompat, opts?.modelId)
+  const generationConfig = generationConfigFrom(body, opts?.modelId)
   if (Object.keys(generationConfig).length > 0) request.generationConfig = generationConfig
-  const tools = toolsFrom(body, nameMap, zcodeCompat)
+  const tools = toolsFrom(body, nameMap)
   if (tools) request.tools = tools
   const toolConfig = toolConfigFrom(body)
   if (toolConfig) request.toolConfig = toolConfig
@@ -606,7 +607,6 @@ export function geminiResponseToOpenAI(
   nameMap: Record<string, string>,
   opts?: GeminiTranslateOptions,
 ): Record<string, unknown> {
-  const zcodeCompat = !!opts?.zcodeCompat
   const data = unwrap(body)
   const candidate = Array.isArray(data.candidates) ? data.candidates[0] : undefined
   const parts: GeminiPart[] = candidate?.content?.parts || []
@@ -629,9 +629,9 @@ export function geminiResponseToOpenAI(
       } catch {
         args = '{}'
       }
-      // zcodeCompat: thought_signature 编码进 id, 客户端原样回传后由请求侧解码;
+      // thought_signature 编码进 id, 客户端原样回传后由请求侧解码;
       // 无签名时优先沿用上游自己的 id(claude/gpt-oss 要求 id 前后一致)
-      const id = zcodeCompat && part.thoughtSignature
+      const id = part.thoughtSignature
         ? encodeSigId(part.thoughtSignature)
         : (part.functionCall.id || `call_${randomId().replace(/-/g, '').slice(0, 24)}`)
       toolCalls.push({
@@ -673,7 +673,6 @@ export function createOpenAIStream(
   onEnd?: (u: GeminiUsage) => void,
   opts?: GeminiTranslateOptions,
 ): ReadableStream<Uint8Array> {
-  const zcodeCompat = !!opts?.zcodeCompat
   const decoder = new TextDecoder()
   const encoder = new TextEncoder()
   let buffer = ''
@@ -733,9 +732,9 @@ export function createOpenAIStream(
         } catch {
           args = '{}'
         }
-        // zcodeCompat: thought_signature 编码进 id, 客户端原样回传后由请求侧解码;
+        // thought_signature 编码进 id, 客户端原样回传后由请求侧解码;
         // 无签名时优先沿用上游自己的 id(claude/gpt-oss 要求 id 前后一致)
-        const id = zcodeCompat && part.thoughtSignature
+        const id = part.thoughtSignature
           ? encodeSigId(part.thoughtSignature)
           : (part.functionCall.id || `call_${randomId().replace(/-/g, '').slice(0, 24)}`)
         emitDelta(controller, {
