@@ -331,9 +331,23 @@ async function recordUsage(p: AntigravityCallParams, usage: AgUsage, ok: boolean
   await addUsageRecord(p.env, record).catch(() => {})
 }
 
+/** 随机打散账号顺序(负载均衡): 每个请求先用随机账号, 失败再依次尝试其余账号。
+ *  避免所有请求都压在第一个账号上, 让多账号的免费额度均匀消耗。
+ *  返回的 index 是账号在渠道配置里的原始序号(1 起), 用于 x-ag-account 观测头。 */
+function shuffleAccounts(list: string[]): Array<{ token: string; index: number }> {
+  const arr = list.map((token, i) => ({ token: token.trim(), index: i + 1 }))
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = arr[i]
+    arr[i] = arr[j]
+    arr[j] = tmp
+  }
+  return arr
+}
+
 export async function handleAntigravityRequest(p: AntigravityCallParams): Promise<Response> {
-  const tokens = (p.refreshTokens || []).filter((t) => t && t.trim())
-  if (tokens.length === 0) {
+  const accounts = shuffleAccounts((p.refreshTokens || []).filter((t) => t && t.trim()))
+  if (accounts.length === 0) {
     return errorResponse('该 antigravity 渠道未配置凭据：请在「API Key」里每行填入一个 Google 账号的 Antigravity refresh_token（可点「用 Google 账号授权」获取）', 400, 'configuration_error')
   }
   const wantStream = p.body?.stream === true
@@ -342,8 +356,8 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
   let lastError = ''
   let lastStatus = 502
 
-  for (let i = 0; i < tokens.length; i++) {
-    const refreshToken = tokens[i].trim()
+  for (let i = 0; i < accounts.length; i++) {
+    const { token: refreshToken, index: accountIndex } = accounts[i]
     try {
       const hash = await sha256Hex(refreshToken)
       const accessToken = await getAccessToken(p.env, refreshToken)
@@ -371,7 +385,7 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
         }, translateOpts)
         return new Response(stream, {
           status: 200,
-          headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive' },
+          headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'x-ag-account': String(accountIndex) },
         })
       }
 
@@ -383,7 +397,7 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
       await recordUsage(p, usage, true, 200)
       return new Response(JSON.stringify(openai), {
         status: 200,
-        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'x-ag-account': String(accountIndex) },
       })
     } catch (err) {
       lastError = (err as Error).message || '未知错误'
