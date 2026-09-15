@@ -43,13 +43,26 @@ function d1KVImpl(db: D1Database): KVLike {
     async list(options) {
       const prefix = options?.prefix ?? ''
       const now = Math.floor(Date.now() / 1000)
-      const res = await db.prepare(
-        'SELECT key FROM kv_store WHERE key LIKE ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY key LIMIT 1000'
-      ).bind(prefix + '%', now).all<{ key: string }>()
+      const limit = 1000
+
+      let query = 'SELECT key FROM kv_store WHERE key LIKE ? AND (expires_at IS NULL OR expires_at > ?)'
+      const binds: any[] = [prefix + '%', now]
+
+      if (options?.cursor) {
+        query += ' AND key > ?'
+        binds.push(options.cursor)
+      }
+      
+      query += ' ORDER BY key ASC LIMIT ?'
+      binds.push(limit)
+
+      const res = await db.prepare(query).bind(...binds).all<{ key: string }>()
+      const results = res.results || []
+
       return {
-        keys: (res.results || []).map((r) => ({ name: r.key })),
-        cursor: undefined,
-        list_complete: true,
+        keys: results.map((r) => ({ name: r.key })),
+        list_complete: results.length < limit,
+        cursor: results.length === limit ? results[results.length - 1].key : undefined,
       }
     },
   }

@@ -1853,7 +1853,7 @@ async function backupExport() {
     a.download = name
     a.click()
     URL.revokeObjectURL(a.href)
-    bkResult('bk-io-result', true, '已导出 ' + name)
+    bkResult('bk-io-result', true, '已导出 ' + name + '（注：为保护隐私，Telegram 通知配置不包含在备份内，还原后需重新填写）')
   } catch (e) { bkResult('bk-io-result', false, '导出失败: ' + e.message) }
 }
 // 导入数据库: 点击按钮立即验证管理员密码, 通过后才选择文件
