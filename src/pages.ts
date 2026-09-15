@@ -722,7 +722,7 @@ function provVertexKeys(id) {
   if (!el) return null
   const txt = (el.value || '').trim()
   if (!txt) return null
-  return txt.split(/\n\s*\n/).map(function (s) { return s.trim() }).filter(Boolean)
+  return txt.split(new RegExp('\\n\\s*\\n')).map(function (s) { return s.trim() }).filter(Boolean)
 }
 function provVertexLocation(id) {
   const el = document.getElementById(id === 'new' ? 'vxl' : 'vxl-' + id)
@@ -734,7 +734,7 @@ function provDevinKeys(id) {
   if (!el) return null
   const txt = (el.value || '').trim()
   if (!txt) return null
-  return txt.split(/\n+/).map(function (s) { return s.trim() }).filter(Boolean)
+  return txt.split(new RegExp('\\n+')).map(function (s) { return s.trim() }).filter(Boolean)
 }
 // 校验 Devin 凭据（GET /v3/self）
 async function verifyDevin(id) {
@@ -767,7 +767,7 @@ async function devinOAuth(id) {
         const dd = await rr.json()
         if (dd.success && dd.data && dd.data.session_token) {
           const el = document.getElementById(id === 'new' ? 'dvt' : 'dvt-' + id)
-          if (el) { el.value = (el.value ? el.value.replace(/\s*$/, '\n') : '') + dd.data.session_token }
+          if (el) { el.value = (el.value ? el.value.replace(new RegExp('\\\\s*$'), '\\n') : '') + dd.data.session_token }
           closeM()
           toast('授权成功（' + (dd.data.user_name || dd.data.user_id || 'Devin') + '），凭据已填入，保存渠道后生效', 'success')
         } else { ok.disabled = false; toast(dd.message || '授权失败', 'error') }
