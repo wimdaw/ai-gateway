@@ -51,7 +51,7 @@ export async function handleLogin(c: Context<{ Bindings: Env }>) {
     return c.json({ success: false, message: '请输入用户名和密码' }, 400)
   }
 
-  // 凭据来源: 环境变量 > 存储中的持久化凭据 > 默认兜底(admin/admin)
+  // 凭据来源: 环境变量 > 存储中的持久化凭据
   let cred: AdminCredentials | null = null
   if (adminUser && adminPass) {
     const passwordHash = await hashPassword(adminPass)
@@ -61,11 +61,10 @@ export async function handleLogin(c: Context<{ Bindings: Env }>) {
   }
 
   if (!cred) {
-    // 首次未配置时默认兜底 admin/admin
-    const defaultUser = adminUser || 'admin'
-    const defaultPass = adminPass || 'admin'
-    const passwordHash = await hashPassword(defaultPass)
-    cred = { username: defaultUser, passwordHash }
+    return c.json({
+      success: false,
+      message: '未配置管理员账号，请在 Cloudflare 环境变量中设置 ADMIN_USERNAME 和 ADMIN_PASSWORD',
+    }, 500)
   }
 
   if (username !== cred.username) {
