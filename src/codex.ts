@@ -52,14 +52,14 @@ const UPSTREAM_RELAY_KEY = 'codex:upstream'
 /** 凭据刷新/鉴权失败(区别于网络错误)：需要按 401 语义返回 */
 class CodexAuthError extends Error {}
 
-interface CodexUpstreamRelay {
+export interface CodexUpstreamRelay {
   /** 对端网关根地址，如 https://api.example.com */
   url: string
   /** 对端网关的转发 Key(Bearer) */
   key: string
 }
 
-async function getCodexUpstreamRelay(env: Env): Promise<CodexUpstreamRelay | null> {
+export async function getCodexUpstreamRelay(env: Env): Promise<CodexUpstreamRelay | null> {
   try {
     const raw = await getKV(env).get(UPSTREAM_RELAY_KEY)
     if (!raw) return null
