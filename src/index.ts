@@ -136,12 +136,6 @@ app.post('/admin/api/backup/delete', handleBackupDelete)
 app.post('/admin/api/telegram/test', handleTelegramTest)
 app.post('/admin/api/backup/to-telegram', handleBackupToTelegram)
 
-// 一次性迁移: KV → D1 (迁移完成后可移除)
-app.post('/admin/api/migrate-kv-to-d1', async (c) => {
-  const { handleMigrateKvToD1 } = await import('./migrate')
-  return handleMigrateKvToD1(c)
-})
-
 // ===== API 转发路由（需转发 Key 验证） =====
 app.use('/v1/*', proxyKeyAuthMiddleware)
 app.get('/v1/models', handleModels)

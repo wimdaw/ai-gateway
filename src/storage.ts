@@ -197,7 +197,7 @@ export async function seedInitialData(env: Env): Promise<void> {
 
 // ===== Token 用量统计 =====
 
-/** 写入一条用量记录（D1 优先：独立行 + SQL 聚合；回退 KV：独立 key + TTL） */
+/** 写入一条用量记录（直接基于 D1：独立行 + SQL 聚合；旧版 KV 回退已废弃：独立 key + TTL） */
 export async function addUsageRecord(env: Env, record: UsageRecord): Promise<void> {
   if (env.DB) {
     await addUsageRecordD1(env.DB, record)
@@ -229,12 +229,12 @@ async function listUsageRecords(env: Env, prefix: string): Promise<UsageRecord[]
   return records
 }
 
-/** 聚合最近 N 天的用量（含当天）—— D1 优先：SQL 直接聚合 */
+/** 聚合最近 N 天的用量（含当天）—— 直接基于 D1：SQL 直接聚合 */
 export async function getUsageSummary(env: Env, days: number): Promise<UsageSummary> {
   if (env.DB) {
     return await getUsageSummaryD1(env.DB, days)
   }
-  // 回退 KV 实现：按前缀聚合（KV 记录带 TTL 自动过期）
+  // 旧版 KV 回退已废弃 实现：按前缀聚合（KV 记录带 TTL 自动过期）
   const prefixes: string[] = []
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(Date.now() - i * 86400000)

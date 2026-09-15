@@ -1,8 +1,8 @@
 /**
- * 存储适配层：统一 Cloudflare D1 / KV 的接口。
- *
- * 优先 env.DB (D1)，不存在时回退 env.KV (KVNamespace)；两者都不可用时降级内存（进程内，不跨实例）。
+ * 存储适配层：统一使用 Cloudflare D1。
+ * 
  * 用量统计走 D1 usage_records 表 SQL 聚合。
+ * KV 兼容接口由 D1 kv_store 表实现。
  */
 
 export interface KVLike {
@@ -14,32 +14,6 @@ export interface KVLike {
     cursor?: string
     list_complete: boolean
   }>
-}
-
-/** 内存兜底：未绑定 D1/KV 时使用（进程内有效，不跨实例） */
-let memoryStore: Map<string, string> | null = null
-
-/** 内存兜底 KV 实现 */
-function memoryKVImpl(): KVLike {
-  const store = memoryStore || (memoryStore = new Map())
-  return {
-    async get(key) {
-      return store.get(key) ?? null
-    },
-    async put(key, value, _options) {
-      store.set(key, value)
-    },
-    async delete(key) {
-      store.delete(key)
-    },
-    async list(options) {
-      const prefix = options?.prefix ?? ''
-      const keys = [...store.keys()]
-        .filter((k) => k.startsWith(prefix))
-        .map((name) => ({ name }))
-      return { keys, cursor: undefined, list_complete: true }
-    },
-  }
 }
 
 /** D1 存储实现（kv_store 表） */
@@ -81,29 +55,22 @@ function d1KVImpl(db: D1Database): KVLike {
   }
 }
 
-/** 获取 KV 兼容实例（优先 D1，其次 KV，最后内存兜底） */
+/** 获取 KV 兼容实例 */
 export function getKV(env: any): KVLike {
-  if (env.DB) return d1KVImpl(env.DB)
-  if (env.KV) return env.KV as KVLike
-  return memoryKVImpl()
+  if (!env.DB) throw new Error('Missing DB binding')
+  return d1KVImpl(env.DB)
 }
 
 /**
- * 返回当前实际生效的存储类型: 'd1' | 'kv' | 'memory'
+ * 返回当前实际生效的存储类型
  */
-export function getStorageType(env: any): 'd1' | 'kv' | 'memory' {
-  if (env.DB) return 'd1'
-  if (env.KV) return 'kv'
-  return 'memory'
+export function getStorageType(_env: any): 'd1' {
+  return 'd1'
 }
 
 /** 存储类型的中文展示名 */
-export function storageTypeLabel(env: any): string {
-  switch (getStorageType(env)) {
-    case 'd1': return 'D1 数据库'
-    case 'kv': return 'Cloudflare KV'
-    case 'memory': return '内存(临时)'
-  }
+export function storageTypeLabel(_env: any): string {
+  return 'D1 数据库'
 }
 
 /** 用量记录 D1 直写（独立行，SQL 聚合） */

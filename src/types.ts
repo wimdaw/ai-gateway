@@ -156,7 +156,6 @@ export interface ApiResponse<T = unknown> {
 }
 
 export interface Env {
-  KV?: KVNamespace  // Pages 模式下无 KV 绑定，D1 优先
   DB: D1Database
   ai_gateway_backup?: R2Bucket
   ADMIN_USERNAME?: string
