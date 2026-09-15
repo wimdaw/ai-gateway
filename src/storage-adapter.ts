@@ -118,3 +118,33 @@ export async function addUsageRecordD1(db: D1Database, record: {
     record.latencyMs || 0,
   ).run().catch(() => {})
 }
+
+let d1Initialized = false
+
+/** 确保 D1 基础表结构存在（首次访问或冷启动容错） */
+export async function ensureD1Tables(db: D1Database): Promise<void> {
+  if (d1Initialized) return
+  try {
+    await db.batch([
+      db.prepare('CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT)'),
+      db.prepare(`CREATE TABLE IF NOT EXISTS usage_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts TEXT NOT NULL,
+        provider TEXT,
+        model TEXT,
+        token TEXT,
+        ok INTEGER DEFAULT 1,
+        status INTEGER DEFAULT 200,
+        prompt_tokens INTEGER DEFAULT 0,
+        completion_tokens INTEGER DEFAULT 0,
+        latency_ms REAL DEFAULT 0
+      )`),
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_records_ts ON usage_records(ts)'),
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_records_model ON usage_records(model)'),
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_records_provider ON usage_records(provider)'),
+    ])
+    d1Initialized = true
+  } catch (e) {
+    console.error('ensureD1Tables failed:', e)
+  }
+}

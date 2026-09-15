@@ -35,6 +35,7 @@ import {
 } from './admin'
 import { renderHomePage, renderLoginPage, renderAdminPage } from './pages'
 import { seedInitialData, getSession } from './storage'
+import { ensureD1Tables } from './storage-adapter'
 import { handleBackupExport, handleBackupImport, handleBackupToR2, handleBackupList, handleBackupRestore, handleBackupDelete, handleTelegramTest, handleBackupToTelegram } from './backup'
 
 const app = new Hono<{ Bindings: Env }>()
@@ -43,9 +44,12 @@ const app = new Hono<{ Bindings: Env }>()
 app.use('*', cors())
 app.use('*', logger())
 
-// 首次请求时填充虚拟数据
+// 首次请求时初始化 D1 表结构并填充初始数据
 let seeded = false
 app.use('*', async (c, next) => {
+  if (c.env.DB) {
+    await ensureD1Tables(c.env.DB)
+  }
   if (!seeded) {
     await seedInitialData(c.env)
     seeded = true

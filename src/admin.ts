@@ -10,6 +10,7 @@ import {
   updateProxyKey,
   deleteProxyKey,
   getUsageSummary,
+  getAdminCredentials,
 } from './storage'
 import { testModelConnectionRotating } from './proxy'
 import { testAntigravity, testAntigravityRotating, buildAntigravityAuthUrl, exchangeAntigravityCode, fetchAntigravityModels, fetchAntigravityQuota } from './antigravity'
@@ -117,7 +118,7 @@ export async function handleStatus(c: Context<{ Bindings: Env }>) {
       modelsCount: totalModels,
       enabledModelsCount: enabledModels,
       proxyKeysCount: proxyKeys.filter((k) => k.enabled).length,
-      adminConfigured: !!(c.env.ADMIN_USERNAME && c.env.ADMIN_PASSWORD),
+      adminConfigured: !!(c.env.ADMIN_USERNAME && c.env.ADMIN_PASSWORD) || (await getAdminCredentials(c.env)) !== null,
       baseUrl: new URL(c.req.url).origin,
     },
   })
