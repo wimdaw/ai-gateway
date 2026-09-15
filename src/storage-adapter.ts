@@ -157,14 +157,15 @@ export async function ensureD1Tables(db: D1Database): Promise<void> {
       db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_records_model ON usage_records(model)'),
       db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_records_provider ON usage_records(provider)'),
       db.prepare('CREATE INDEX IF NOT EXISTS idx_kv_store_expires ON kv_store(expires_at) WHERE expires_at IS NOT NULL'),
-      // 为已有表补充 expires_at 字段（已有 expires_at 的表执行此语句会静默失败）
-      db.prepare('ALTER TABLE kv_store ADD COLUMN expires_at INTEGER DEFAULT NULL'),
     ])
-    d1Initialized = true
   } catch (e) {
-    // ALTER TABLE 对已有列会报错，属正常，重置 flag 让下次启动可再试
-    // 只要基础表创建成功即可
-    d1Initialized = true
-    console.error('ensureD1Tables partial error (expected for ALTER on existing):', (e as Error).message)
+    console.error('ensureD1Tables create error:', (e as Error).message)
   }
+
+  try {
+    // 独立执行 ALTER，避免其静默报错导致整个 batch 事务回滚
+    await db.prepare('ALTER TABLE kv_store ADD COLUMN expires_at INTEGER DEFAULT NULL').run()
+  } catch (e) { /* ignore expected duplicate column error */ }
+
+  d1Initialized = true
 }
