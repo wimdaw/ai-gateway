@@ -28,6 +28,8 @@ export interface Provider {
   mirrorUrls?: string[]
   /** GCP 项目 ID(仅 type=antigravity 使用; 一般留空由网关自动解析) */
   project?: string
+  /** GCP 区域(仅 type=vertex 使用; 如 us-central1 / global, 留空默认 us-central1) */
+  location?: string
   /** Azure TTS 音色配置(仅 type=azure-tts 使用) */
   voice?: string
   rate?: string
@@ -115,6 +117,7 @@ export interface CreateProviderRequest {
   models?: Array<{ id: string; enabled: boolean }> | string[]
   mirrorUrls?: string[] | string
   project?: string
+  location?: string
   voice?: string
   rate?: string
   volume?: string
@@ -131,6 +134,7 @@ export interface UpdateProviderRequest {
   models?: Array<{ id: string; enabled: boolean }> | string[]
   mirrorUrls?: string[] | string
   project?: string
+  location?: string
   voice?: string
   rate?: string
   volume?: string

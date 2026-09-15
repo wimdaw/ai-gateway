@@ -133,10 +133,10 @@ CLIProxyAPI 的 Antigravity 反代：Antigravity OAuth → `cloudcode-pa` 的 `v
      后面那一段（或整段地址）粘回弹窗，网关自动换取 refresh_token 并填入 API Keys。
    - **获取模型列表**：点 **「获取模型列表」** 会用该凭据拉取 Antigravity 可用模型名，追加到模型列表。
    - **GCP 项目 ID**：无需填写，网关自动 `loadCodeAssist` / `onboardUser` 解析。
-   - **ZCode 兼容**：编程 Agent（ZCode / Claude Code 等）请开启。开启后网关深度清洗工具 Schema
-     （合并 `allOf`、`oneOf` → `anyOf`、`type: ["string","null"]` → `nullable`、剔除 `propertyNames`
-     等 Gemini 不支持的关键字、过滤悬空的 `required`），并捕获/回传 Gemini 的 `thought_signature`
-     以支持多轮工具调用历史。关闭时保持原有翻译行为。
+   - **编程 Agent 兼容（内置，无需开关）**：网关默认深度清洗工具 Schema（合并 `allOf`、
+     剥离 `oneOf`/`anyOf` 与长度约束、`type: ["string","null"]` → `nullable`、过滤悬空的 `required`），
+     回传 `thought_signature` 支持多轮工具调用历史，并透传工具调用 id。ZCode / Claude Code 等
+     Agent 可直接接入；各模型流式输出上限也已按实测钳制（gpt-oss 32768 / claude 64000 / Gemini 各档）。
 2. 保存后在渠道里对模型点插头图标测试连通性。
 
 > 模型名以「获取模型列表」返回的为准（例如 `gemini-3.5-flash`、`claude-sonnet-4-6` 等）。
@@ -144,6 +144,35 @@ CLIProxyAPI 的 Antigravity 反代：Antigravity OAuth → `cloudcode-pa` 的 `v
 >
 > 在 ZCode 里作为「OpenAI 兼容」供应商接入：Base URL 填 `https://<网关域名>/v1`，
 > 模型填 `<渠道ID>/<模型ID>`（如 `antigravity/gemini-3.5-flash`），API Key 填网关令牌。
+
+## Vertex AI 反代（`vertex` 渠道）
+
+复刻 CLIProxyAPI 的 Gemini Vertex executor：用 **GCP 服务账号** 私钥签 RS256 JWT 换 access_token
+（KV 缓存），请求走
+
+```
+https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent
+```
+
+（`location = global` 时用 `https://aiplatform.googleapis.com`）。请求/响应与 Gemini 协议互转，
+同样统一在 `/v1/chat/completions`。
+
+### 配置步骤
+
+1. GCP 控制台 → IAM 与管理 → 服务账号 → 创建服务账号（至少授予 `Vertex AI User`）→ 密钥 →
+   新建密钥（JSON），下载得到的 JSON 整段复制。
+2. 后台「添加渠道」→ 渠道类型选 **Vertex AI 反代**：
+   - **API 地址**：自动填 `https://aiplatform.googleapis.com`，无需修改。
+   - **服务账号 JSON**：把整段 JSON 粘进文本框（含换行没问题）；**多个账号之间空一行**即可轮流使用，
+     网关会随机打散做负载均衡。
+   - **区域 Location**：如 `us-central1`、`global`，留空默认 `us-central1`。
+   - **校验凭据**：点「验证」会换一次 token 并用渠道里第一个模型试跑，直接告诉你结果。
+3. 模型 ID 填 Vertex 上的 Gemini 模型名，如 `gemini-2.5-flash`、`gemini-2.5-pro`。
+
+> `project_id` 从服务账号 JSON 里自动读取，无需单独填。
+>
+> 已知限制：Express 模式的 API Key 在 `aiplatform.googleapis.com` 通用端点会被 Google 拒绝
+> （`API keys are not supported by this API`），请优先使用服务账号。
 
 ## OAuth 反代渠道（`claude` / `codex` / `kimi` / `grok`）
 

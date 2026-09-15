@@ -159,6 +159,7 @@ apiKeys: normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true })),
       : [],
     mirrorUrls: normalizeMirrorUrls(body.mirrorUrls),
     project: body.project,
+    location: body.location,
     voice: body.voice,
     rate: body.rate,
     volume: body.volume,
@@ -188,6 +189,7 @@ export async function handleUpdateProvider(c: Context<{ Bindings: Env }>) {
   if (body.pitch !== undefined) updates.pitch = body.pitch
   if (body.mirrorUrls !== undefined) updates.mirrorUrls = normalizeMirrorUrls(body.mirrorUrls)
   if (body.project !== undefined) updates.project = body.project
+  if (body.location !== undefined) updates.location = body.location
 if (body.apiKeys !== undefined) {
     updates.apiKeys = normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true }))
   }
@@ -858,4 +860,19 @@ export async function handleGetUsage(c: Context<{ Bindings: Env }>) {
   const days = Math.min(Math.max(parseInt(q || '1') || 1, 1), 30)
   const summary = await getUsageSummary(c.env, days)
   return c.json<ApiResponse>({ success: true, data: summary })
+}
+
+/** 校验 Vertex 凭据：服务账号 JSON 或 Express API Key（后台「验证凭据」按钮用） */
+export async function handleVertexVerify(c: Context<{ Bindings: Env }>) {
+  const body = await c.req.json<{ credential?: string; model?: string; location?: string }>().catch(() => ({} as { credential?: string; model?: string; location?: string }))
+  const credential = (body.credential || '').trim()
+  if (!credential) return c.json<ApiResponse<null>>({ success: false, message: '请先填写服务账号 JSON 或 API Key' }, 400)
+  const { testVertex } = await import('./vertex')
+  const result = await testVertex(c.env, credential, body.model?.trim() || undefined, body.location?.trim() || undefined)
+  return c.json<ApiResponse<{ message: string; statusCode?: number }>>(
+    result.success
+      ? { success: true, data: { message: result.message, statusCode: result.statusCode } }
+      : { success: false, message: result.message },
+    result.success ? 200 : 400,
+  )
 }

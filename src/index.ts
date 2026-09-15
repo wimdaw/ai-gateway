@@ -24,6 +24,7 @@ import {
   handleAntigravityModels,
   handleAntigravityQuotaAll,
   handleAntigravityAccounts,
+  handleVertexVerify,
   handleOAuthStart,
   handleOAuthComplete,
   handleOAuthPoll,
@@ -106,6 +107,7 @@ app.post('/admin/api/antigravity/oauth/complete', handleAntigravityOAuthComplete
 app.post('/admin/api/antigravity/models', handleAntigravityModels)
 app.post('/admin/api/antigravity/quota', handleAntigravityQuotaAll)
 app.post('/admin/api/antigravity/accounts', handleAntigravityAccounts)
+app.post('/admin/api/vertex/verify', handleVertexVerify)
 
 // OAuth 反代渠道内置授权(claude/codex: 授权链接; kimi/grok: 设备码轮询)
 app.post('/admin/api/oauth/:provider/start', handleOAuthStart)

@@ -439,7 +439,7 @@ ${H('管理')}
             </div>
             <div class="fg"><label for="aurl">API 地址</label><input type="url" id="aurl" placeholder="https://api.deepseek.com"></div>
             <div class="fg" data-hide-ag><label for="amirror">镜像地址</label><textarea id="amirror" rows="3" placeholder="https://opencode.ai.cmliussss.net/zen/v1&#10;每行一个, 留空使用 OPENCODE_MIRRORS_URL 环境变量"></textarea><span class="form-helper">官方地址失败后自动故障转移到的镜像地址，每行一个 URL。</span></div>
-            <div class="fg"><label for="apt">渠道类型</label><select id="apt" class="select-sm" onchange="onTypeChange(this, 'new')"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 兼容</option><option value="openai-video">OpenAI 视频</option><option value="agnes-video">Agnes 异步视频</option><option value="azure-tts">Azure TTS 语音</option><option value="antigravity">Antigravity 反代</option><option value="claude">Claude OAuth 反代</option><option value="codex">ChatGPT (Codex) 反代</option><option value="kimi">Kimi OAuth 反代</option><option value="grok">Grok OAuth 反代</option><option value="qwen">Qwen OAuth 反代</option><option value="deepseek">DeepSeek 反代</option><option value="zai">Z.AI (GLM 国际)</option></select><span class="form-helper" id="apt-hint-new">Agnes 等聚合平台建议选 OpenAI 兼容, 视频模型自动走异步适配。</span></div>
+            <div class="fg"><label for="apt">渠道类型</label><select id="apt" class="select-sm" onchange="onTypeChange(this, 'new')"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 兼容</option><option value="openai-video">OpenAI 视频</option><option value="agnes-video">Agnes 异步视频</option><option value="azure-tts">Azure TTS 语音</option><option value="antigravity">Antigravity 反代</option><option value="claude">Claude OAuth 反代</option><option value="codex">ChatGPT (Codex) 反代</option><option value="kimi">Kimi OAuth 反代</option><option value="grok">Grok OAuth 反代</option><option value="qwen">Qwen OAuth 反代</option><option value="deepseek">DeepSeek 反代</option><option value="vertex">Vertex AI 反代</option><option value="zai">Z.AI (GLM 国际)</option></select><span class="form-helper" id="apt-hint-new">Agnes 等聚合平台建议选 OpenAI 兼容, 视频模型自动走异步适配。</span></div>
             <div class="ag-config" id="ag-new" style="display:none"><div class="fg"><label>获取 refresh_token</label><button class="btn btn-s" type="button" onclick="antigravityOAuth('new')"><i class="fas fa-key" aria-hidden="true"></i>用 Google 账号授权</button><span class="form-helper">点开授权：Google 登录并同意后浏览器会跳到 localhost:51121 提示「无法访问」（正常），把地址栏 code= 后面那段粘回弹窗，网关自动换取 refresh_token 并填入下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchAgModels('new')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button><span class="form-helper">用 refresh_token 拉取 Antigravity 可用模型名，追加到下方模型列表。</span></div>
             <div class="ag-config" id="ds-new" style="display:none"><div class="fg"><label>获取 userToken</label><span class="form-helper">两种凭据：① <b>官方 API Key</b>（<code>sk-</code> 开头）→ 直连 api.deepseek.com，免费版可用；② <b>网页 userToken</b>（登录 chat.deepseek.com → F12 → Application → Local Storage → <code>userToken</code>，JWT 约 24h）→ 网页反代，需 Workers Paid（PoW 约 0.3~0.7s CPU，免费版 10ms 上限会失败）。填入下方 API Keys。</span></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyDeepseek('new')"><i class="fas fa-plug" aria-hidden="true"></i>验证 userToken</button></div></div>
             <div class="ag-config" id="oa-new" style="display:none"><div class="fg"><label>获取凭据</label><button class="btn btn-s" type="button" onclick="oauthChannel('new')"><i class="fas fa-key" aria-hidden="true"></i>授权登录获取 refresh_token</button><span class="form-helper">Claude/ChatGPT 跳转官方授权页（回调到 localhost 属正常，复制地址栏 code）；Kimi/Grok 弹出设备码验证页并自动等待授权。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchOAuthModels('new')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button><span class="form-helper">Claude/Kimi 支持自动拉取模型；Codex/Grok 请手动填写（如 gpt-5.5、grok-4.6）。</span></div></div>
@@ -450,22 +450,24 @@ ${H('管理')}
             <fieldset class="form-group"><legend>模型 ID</legend><div id="amodels"><div class="fc mb-4 field-row"><input type="text" placeholder="deepseek-chat" class="fx1 ami" aria-label="模型 ID"><input type="text" placeholder="对外名(可选)" class="fx1 amal" aria-label="对外名" title="对外显示名, 留空自动去:free后缀"><label class="tg" title="启用模型"><input type="checkbox" checked class="ame" aria-label="启用模型"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)" title="复制模型 ID" aria-label="复制模型 ID"><i class="far fa-copy" aria-hidden="true"></i></button><button class="icon-btn" onclick="testNewMdl(this)" title="测试模型" aria-label="测试模型"><i class="fas fa-plug" aria-hidden="true"></i></button><button class="icon-btn" onclick="this.parentElement.remove()" title="移除模型" aria-label="移除模型"><i class="fas fa-times" aria-hidden="true"></i></button></div></div><button class="btn btn-s" onclick="addMdlRow()"><i class="fas fa-plus" aria-hidden="true"></i>添加模型</button></fieldset>
             <div class="panel-actions"><label class="switch-label"><span>创建后立即启用</span><span class="tg"><input type="checkbox" checked id="aen"><span class="sl"></span></span></label><div><button class="btn btn-s" onclick="hideAdd()">取消</button><button class="btn btn-p" onclick="createProv()"><i class="fas fa-check" aria-hidden="true"></i>创建渠道</button></div></div>
             <div id="atestR" class="mt-1" aria-live="polite"></div>
-          </div>
+          </div><div class="vx-config" id="vx-new" style="display:none"><div class="fg"><label>服务账号 JSON</label><textarea id="vxs" rows="4" class="fx1" placeholder='{"type":"service_account","project_id":"my-project","private_key":"-----BEGIN PRIVATE KEY-----\n...","client_email":"svc@my-project.iam.gserviceaccount.com"}'></textarea><span class="form-helper">GCP 控制台 → IAM 与管理 → 服务账号 → 密钥 → 新建 JSON 密钥，整段粘贴（回车换行没问题）；多个账号之间空一行即轮流使用。Express 模式的 API Key 在通用端点会被 Google 拒绝，建议用服务账号。</span></div><div class="fr"><div class="fg"><label>区域 Location</label><input type="text" id="vxl" placeholder="us-central1"></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyVertex('new')"><i class="fas fa-plug" aria-hidden="true"></i>验证</button></div></div></div>
+            
         </div>
 
         <div class="gp provider-list" id="plist">
           ${providers.length ? providers.map(p=>`
           <article class="pi" data-id="${escapePageHtml(p.id)}">
             <div class="ps" onclick="tog('${p.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();tog('${p.id}')}" aria-controls="dt-${escapePageHtml(p.id)}">
-              <div class="l"><i class="fas fa-chevron-right provider-chevron" aria-hidden="true" id="ch-${escapePageHtml(p.id)}"></i><span class="provider-avatar" aria-hidden="true">${escapePageHtml(p.name.charAt(0).toUpperCase() || 'A')}</span><div><h3>${escapePageHtml(p.name)}</h3><div class="pu"><code>${escapePageHtml(p.id)}</code><span>${p.type==='antigravity'?'Antigravity':p.type==='claude'?'Claude':p.type==='codex'?'Codex':p.type==='kimi'?'Kimi':p.type==='grok'?'Grok':p.type==='qwen'?'Qwen':p.type==='deepseek'?'DeepSeek':p.type==='zai'?'Z.AI':(p.apiType||'openai')==='anthropic'?'Anthropic':'OpenAI'}</span><span>${p.apiKeys.length} Keys</span><span>${p.models.length} 模型</span></div></div></div>
+              <div class="l"><i class="fas fa-chevron-right provider-chevron" aria-hidden="true" id="ch-${escapePageHtml(p.id)}"></i><span class="provider-avatar" aria-hidden="true">${escapePageHtml(p.name.charAt(0).toUpperCase() || 'A')}</span><div><h3>${escapePageHtml(p.name)}</h3><div class="pu"><code>${escapePageHtml(p.id)}</code><span>${p.type==='antigravity'?'Antigravity':p.type==='claude'?'Claude':p.type==='codex'?'Codex':p.type==='kimi'?'Kimi':p.type==='grok'?'Grok':p.type==='qwen'?'Qwen':p.type==='deepseek'?'DeepSeek':p.type==='vertex'?'Vertex':p.type==='zai'?'Z.AI':(p.apiType||'openai')==='anthropic'?'Anthropic':'OpenAI'}</span><span>${p.apiKeys.length} Keys</span><span>${p.models.length} 模型</span></div></div></div>
               <div class="fc fx-s0" onclick="event.stopPropagation()"><label class="tg"><input type="checkbox" ${p.enabled?'checked':''} id="en-${escapePageHtml(p.id)}" onchange="togglePb('${p.id}',this.checked)" aria-label="启用 ${escapePageHtml(p.name)}"><span class="sl"></span></label><span class="bd ${p.enabled?'bd-on':'bd-off'}">${p.enabled?'已启用':'未启用'}</span></div>
             </div>
             <div class="pd" id="dt-${escapePageHtml(p.id)}">
-              <div class="detail-heading"><div><h3>编辑 ${escapePageHtml(p.name)}</h3><p>保存后，新配置会用于后续转发请求。</p></div><span class="protocol-chip">${p.type==='antigravity'?'ANTIGRAVITY':p.type==='claude'?'CLAUDE':p.type==='codex'?'CODEX':p.type==='kimi'?'KIMI':p.type==='grok'?'GROK':p.type==='qwen'?'QWEN':p.type==='deepseek'?'DEEPSEEK':p.type==='zai'?'Z.AI':(p.apiType||'openai')==='anthropic'?'ANTHROPIC':'OPENAI'}</span></div>
+              <div class="detail-heading"><div><h3>编辑 ${escapePageHtml(p.name)}</h3><p>保存后，新配置会用于后续转发请求。</p></div><span class="protocol-chip">${p.type==='antigravity'?'ANTIGRAVITY':p.type==='claude'?'CLAUDE':p.type==='codex'?'CODEX':p.type==='kimi'?'KIMI':p.type==='grok'?'GROK':p.type==='qwen'?'QWEN':p.type==='deepseek'?'DEEPSEEK':p.type==='vertex'?'VERTEX':p.type==='zai'?'Z.AI':(p.apiType||'openai')==='anthropic'?'ANTHROPIC':'OPENAI'}</span></div>
               <div class="fr"><div class="fg"><label>名称</label><input type="text" id="nm-${escapePageHtml(p.id)}" value="${escapePageHtml(p.name)}"></div><div class="fg"><label>ID</label><input type="text" id="pid-${escapePageHtml(p.id)}" value="${escapePageHtml(p.id)}" title="渠道唯一标识, 修改后旧 ID 失效"></div></div>
               <div class="fg"><label>API 地址</label><input type="url" id="url-${escapePageHtml(p.id)}" value="${escapePageHtml(p.baseUrl)}" ${(p.type||'openai')==='azure-tts'?'disabled placeholder="Azure TTS 为内置服务，无需 API 地址"':''}></div>
-              <div class="fr"><div class="fg"><label>渠道类型</label><select id="pt-${escapePageHtml(p.id)}" class="select-sm" onchange="onTypeChange(this, '${escapePageHtml(p.id)}')"><option value="openai" ${(p.type||'openai')==='openai'?'selected':''}>OpenAI 兼容</option><option value="anthropic" ${p.type==='anthropic'?'selected':''}>Anthropic 兼容</option><option value="openai-video" ${p.type==='openai-video'?'selected':''}>OpenAI 视频</option><option value="agnes-video" ${p.type==='agnes-video'?'selected':''}>Agnes 异步视频</option><option value="azure-tts" ${p.type==='azure-tts'?'selected':''}>Azure TTS 语音</option><option value="antigravity" ${p.type==='antigravity'?'selected':''}>Antigravity 反代</option><option value="claude" ${p.type==='claude'?'selected':''}>Claude OAuth 反代</option><option value="codex" ${p.type==='codex'?'selected':''}>ChatGPT (Codex) 反代</option><option value="kimi" ${p.type==='kimi'?'selected':''}>Kimi OAuth 反代</option><option value="grok" ${p.type==='grok'?'selected':''}>Grok OAuth 反代</option><option value="qwen" ${p.type==='qwen'?'selected':''}>Qwen OAuth 反代</option><option value="deepseek" ${p.type==='deepseek'?'selected':''}>DeepSeek 反代</option><option value="zai" ${p.type==='zai'?'selected':''}>Z.AI (GLM 国际)</option></select></div></div>
-              <div class="ag-config" id="ag-${escapePageHtml(p.id)}" ${p.type==='antigravity'?'':'style="display:none"'}><div class="fg"><label>获取 refresh_token</label><button class="btn btn-s" type="button" onclick="antigravityOAuth('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>用 Google 账号授权</button><span class="form-helper">授权后浏览器跳转 localhost:51121 显示「无法访问」属正常，复制地址栏 code= 后面那一段回来，refresh_token 会自动追加到下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchAgModels('${escapePageHtml(p.id)}')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button></div></div>
+              <div class="fr"><div class="fg"><label>渠道类型</label><select id="pt-${escapePageHtml(p.id)}" class="select-sm" onchange="onTypeChange(this, '${escapePageHtml(p.id)}')"><option value="openai" ${(p.type||'openai')==='openai'?'selected':''}>OpenAI 兼容</option><option value="anthropic" ${p.type==='anthropic'?'selected':''}>Anthropic 兼容</option><option value="openai-video" ${p.type==='openai-video'?'selected':''}>OpenAI 视频</option><option value="agnes-video" ${p.type==='agnes-video'?'selected':''}>Agnes 异步视频</option><option value="azure-tts" ${p.type==='azure-tts'?'selected':''}>Azure TTS 语音</option><option value="antigravity" ${p.type==='antigravity'?'selected':''}>Antigravity 反代</option><option value="claude" ${p.type==='claude'?'selected':''}>Claude OAuth 反代</option><option value="codex" ${p.type==='codex'?'selected':''}>ChatGPT (Codex) 反代</option><option value="kimi" ${p.type==='kimi'?'selected':''}>Kimi OAuth 反代</option><option value="grok" ${p.type==='grok'?'selected':''}>Grok OAuth 反代</option><option value="qwen" ${p.type==='qwen'?'selected':''}>Qwen OAuth 反代</option><option value="deepseek" ${p.type==='deepseek'?'selected':''}>DeepSeek 反代</option><option value="vertex" ${p.type==='vertex'?'selected':''}>Vertex AI 反代</option><option value="zai" ${p.type==='zai'?'selected':''}>Z.AI (GLM 国际)</option></select></div></div>
+              <div class="ag-config" id="ag-${escapePageHtml(p.id)}" ${p.type==='antigravity'?'':'style="display:none"'}><div class="fg"><label>获取 refresh_token</label><button class="btn btn-s" type="button" onclick="antigravityOAuth('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>用 Google 账号授权</button><span class="form-helper">授权后浏览器跳转 localhost:51121 显示「无法访问」属正常，复制地址栏 code= 后面那一段回来，refresh_token 会自动追加到下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchAgModels('${escapePageHtml(p.id)}')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button></div></div><div class="vx-config" id="vx-${escapePageHtml(p.id)}" style="display:none"><div class="fg"><label>服务账号 JSON</label><textarea id="vxs-${escapePageHtml(p.id)}" rows="4" class="fx1">${escapePageHtml((p.apiKeys||[]).map(k=>k.key).join('\n\n'))}</textarea><span class="form-helper">保存时以本框内容为准（多个账号空行分隔）；也可填 Express API Key。</span></div><div class="fr"><div class="fg"><label>区域 Location</label><input type="text" id="vxl-${escapePageHtml(p.id)}" value="${escapePageHtml(p.location||'')}" placeholder="us-central1"></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyVertex('${escapePageHtml(p.id)}')"><i class="fas fa-plug" aria-hidden="true"></i>验证</button></div></div></div>
+            
               <div class="ag-config" id="ds-${escapePageHtml(p.id)}" ${p.type==='deepseek'?'':'style="display:none"'}><div class="fg"><label>获取 userToken</label><span class="form-helper">两种凭据：① <b>官方 API Key</b>（<code>sk-</code> 开头）→ 直连 api.deepseek.com，免费版可用；② <b>网页 userToken</b>（chat.deepseek.com 的 localStorage.userToken，JWT 约 24h）→ 网页反代，需 Workers Paid（PoW 约 0.3~0.7s CPU）。填入下方 API Keys。</span></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyDeepseek('${escapePageHtml(p.id)}')"><i class="fas fa-plug" aria-hidden="true"></i>验证 userToken</button></div></div>
               <div class="ag-config" id="oa-${escapePageHtml(p.id)}" ${['claude','codex','kimi','grok','qwen'].includes(p.type||'')?'':'style="display:none"'}><div class="fg"><label>获取凭据</label><button class="btn btn-s" type="button" onclick="oauthChannel('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>授权登录获取 refresh_token</button><span class="form-helper">Claude/ChatGPT 跳转官方授权页（回调到 localhost 属正常，复制地址栏 code）；Kimi/Grok 弹出设备码验证页并自动等待授权。refresh_token 会追加到下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchOAuthModels('${escapePageHtml(p.id)}')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button></div></div>
               <div class="tts-config" id="tts-${escapePageHtml(p.id)}" ${(p.type||'openai')==='azure-tts'?'':'style="display:none"'}><fieldset class="form-group"><legend>Azure TTS 音色配置（请求体可临时覆盖）</legend><div class="fr"><div class="fg"><label>音色 Voice</label><div class="tts-voice-row"><select id="pv-${escapePageHtml(p.id)}" class="select-sm"><option value="">自定义…</option>${azureVoiceOptions(p.voice||'zh-CN-XiaoxiaoNeural')}</select><button class="btn btn-s" type="button" onclick="previewTts('${escapePageHtml(p.id)}')" title="试听当前音色"><i class="fas fa-play" aria-hidden="true"></i>试听</button></div></div><div class="fg"><label>语速 Rate</label><input type="text" id="pr-${escapePageHtml(p.id)}" value="${escapePageHtml(p.rate||'+0%')}" placeholder="+0%"></div></div><div class="fr"><div class="fg"><label>音量 Volume</label><input type="text" id="pvol-${escapePageHtml(p.id)}" value="${escapePageHtml(p.volume||'+0%')}" placeholder="+0%"></div><div class="fg"><label>音调 Pitch</label><input type="text" id="pp-${escapePageHtml(p.id)}" value="${escapePageHtml(p.pitch||'+0Hz')}" placeholder="+0Hz"></div></div><div class="tts-preview" id="ttp-${escapePageHtml(p.id)}"></div><div class="fc" style="gap:8px;flex-wrap:wrap"><button class="btn btn-s" type="button" onclick="addTtsModel('${escapePageHtml(p.id)}')" title="把当前选中的音色添加到模型列表"><i class="fas fa-plus" aria-hidden="true"></i>添加模型</button><button class="btn btn-s" type="button" onclick="addAllTtsModels('${escapePageHtml(p.id)}')"><i class="fas fa-microphone" aria-hidden="true"></i>添加全部音色为模型</button></div></fieldset></div>
@@ -656,6 +658,8 @@ function onTypeChange(sel, id) {
   const isDs = isDeepseekType(sel.value)
   const dsBox = document.getElementById('ds-' + id)
   if (dsBox) dsBox.style.display = isDs ? '' : 'none'
+  const vxBox = document.getElementById('vx-' + id)
+  if (vxBox) vxBox.style.display = sel.value === 'vertex' ? '' : 'none'
   const isZai = isZaiType(sel.value)
   const hint = document.getElementById('apt-hint-' + id)
   if (hint) {
@@ -708,6 +712,37 @@ function provProject(id) {
   const el = document.getElementById(id === 'new' ? 'agpj' : 'agpj-' + id)
   return el ? el.value.trim() : ''
 }
+// Vertex 凭据（服务账号 JSON 或 Express API Key，多个之间空行分隔）
+function provVertexKeys(id) {
+  const el = document.getElementById(id === 'new' ? 'vxs' : 'vxs-' + id)
+  if (!el) return null
+  const txt = (el.value || '').trim()
+  if (!txt) return null
+  return txt.split(/\n\s*\n/).map(function (s) { return s.trim() }).filter(Boolean)
+}
+function provVertexLocation(id) {
+  const el = document.getElementById(id === 'new' ? 'vxl' : 'vxl-' + id)
+  return el ? el.value.trim() : ''
+}
+// 校验 Vertex 凭据：换 token，并用渠道里的第一个模型试跑一次
+async function verifyVertex(id) {
+  const keys = provVertexKeys(id)
+  if (!keys || !keys.length) { toast('请先填写服务账号 JSON 或 API Key', 'error'); return }
+  let model = ''
+  const ml = document.getElementById(id === 'new' ? 'amodels' : 'ml-' + id)
+  if (ml) {
+    const inp = ml.querySelector('.ami') || ml.querySelector('[data-idx] input')
+    if (inp) model = inp.value.trim()
+  }
+  toast('校验中…', 'success')
+  try {
+    const r = await fetch('/admin/api/vertex/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: keys[0], model: model || undefined, location: provVertexLocation(id) || undefined }) })
+    const d = await r.json()
+    toast(d.success ? ((d.data && d.data.message) || '凭据有效') : (d.message || '校验失败'), d.success ? 'success' : 'error')
+  } catch (e) { toast('校验请求失败', 'error') }
+}
+
 // 把授权得到的 refresh_token 追加到「上游 API Keys」列表
 function addKeyValue(id, value) {
   if (!value) return
@@ -1305,11 +1340,13 @@ async function createProv() {
   const type = document.getElementById('apt').value
   const apiType = type === 'anthropic' ? 'anthropic' : 'openai'
   const aki = document.querySelectorAll('#akeys .aki')
-  const keys = Array.from(aki).map((inp, i) => {
+  let keys = Array.from(aki).map((inp, i) => {
     const k = inp.value.trim()
     const en = inp.parentElement.querySelector('.ake')?.checked ?? true
     return k ? { key: k, enabled: en } : null
   }).filter(Boolean)
+  const vxNewKeys = type === 'vertex' ? provVertexKeys('new') : null
+  if (vxNewKeys && vxNewKeys.length) keys = vxNewKeys.map(k => ({ key: k, enabled: true }))
   const ami = document.querySelectorAll('#amodels .ami')
   const models = Array.from(ami).map(inp => {
     const mid = inp.value.trim()
@@ -1324,7 +1361,7 @@ async function createProv() {
   const isTts = type === 'azure-tts'
   const isAg = type === 'antigravity'
   const isOa = isOauthType(type) || isDeepseekType(type)
-  const url = document.getElementById('aurl').value.trim() || (isTts ? 'https://speech.platform.bing.com' : isAg ? 'https://daily-cloudcode-pa.googleapis.com' : (isOa || isZaiType(type)) ? OAUTH_DEFAULT_URLS[type] : '')
+  const url = document.getElementById('aurl').value.trim() || (isTts ? 'https://speech.platform.bing.com' : isAg ? 'https://daily-cloudcode-pa.googleapis.com' : type === 'vertex' ? 'https://aiplatform.googleapis.com' : (isOa || isZaiType(type)) ? OAUTH_DEFAULT_URLS[type] : '')
   if (!nm || !id || !url) { toast('请填写名称、ID 和 API 地址', 'error'); return }
   const ttsConf = isTts ? {
     voice: document.getElementById('av').value.trim() || 'zh-CN-XiaoxiaoNeural',
@@ -1335,7 +1372,7 @@ async function createProv() {
   const r = await fetch('/admin/api/providers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, name: nm, baseUrl: url, apiType, type, apiKeys: keys, models, mirrorUrls, enabled, project: provProject('new') || undefined, ...ttsConf })
+    body: JSON.stringify({ id, name: nm, baseUrl: url, apiType, type, apiKeys: keys, models, mirrorUrls, enabled, project: provProject('new') || undefined, location: provVertexLocation('new') || undefined, ...ttsConf })
   })
   const d = await r.json()
   if (d.success) { toast('已创建', 'success'); location.reload() }
@@ -1454,8 +1491,11 @@ async function save(id) {
   const apiType = type === 'anthropic' ? 'anthropic' : 'openai'
   const isTts = type === 'azure-tts'
   if (!url && type === 'antigravity') url = 'https://daily-cloudcode-pa.googleapis.com'
+  if (!url && type === 'vertex') url = 'https://aiplatform.googleapis.com'
   if (!url && (isOauthType(type) || isDeepseekType(type) || isZaiType(type))) url = OAUTH_DEFAULT_URLS[type] || ''
-  const keys = getKeys(id)
+  let keys = getKeys(id)
+  const vxKeys = type === 'vertex' ? provVertexKeys(id) : null
+  if (vxKeys && vxKeys.length) keys = vxKeys.map(k => ({ key: k, enabled: true }))
   const models = getMdl(id), enabled = document.getElementById('en-' + id).checked
   const mirEl = document.getElementById('mir-' + id)
   const mirrorUrls = mirEl ? mirEl.value : undefined
@@ -1469,7 +1509,7 @@ async function save(id) {
   const r = await fetch('/admin/api/providers/' + encodeURIComponent(id), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: nm, baseUrl: url, apiType, type, apiKeys: keys, models, mirrorUrls, enabled, newId, project: provProject(id) || undefined, ...ttsConf })
+    body: JSON.stringify({ name: nm, baseUrl: url, apiType, type, apiKeys: keys, models, mirrorUrls, enabled, newId, project: provProject(id) || undefined, location: provVertexLocation(id) || undefined, ...ttsConf })
   })
   const d = await r.json()
   if (d.success) { toast('已保存', 'success'); location.reload() }
