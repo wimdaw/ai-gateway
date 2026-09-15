@@ -5,14 +5,13 @@ import type { Env } from './types'
 import { CSS_CONTENT } from './pages.css'
 import { SHARED_JS, renderSiteFooter } from './shared.js'
 
-// 检测运行平台 + 存储类型, 返回如 "Workers · D1" "Pages · KV"
-function getPlatformLabel(env: any): string {
-  // CF Workers: globalThis.caches 存在但无 .default; Pages 有 .default
-  // 但 headless 浏览器不一致, 用 fetch 环境检测更可靠
-  const isPages = !!(globalThis as any).__CF_PAGES__ || !!(globalThis as any).pages
-  const platform = isPages ? 'Pages' : 'Workers'
+// 检测运行平台 + 存储类型, 返回如 "Pages · D1"
+function getPlatformLabel(env: any, host?: string): string {
+  // 运行平台: 当前项目已适配 Cloudflare Pages 架构，除非明确来自 workers.dev 域名，否则均标识为 Pages
+  const isWorker = typeof host === 'string' && host.includes('workers.dev')
+  const platform = isWorker ? 'Workers' : 'Pages'
   const storage = env?.DB ? 'D1' : env?.KV ? 'KV' : 'Memory'
-  return platform + ' · ' + storage
+  return `${platform} · ${storage}`
 }
 import { storageTypeLabel } from './storage-adapter'
 import { AZURE_TTS_VOICES, voiceGroup } from './azure-voices'
@@ -195,7 +194,7 @@ ${H('首页')}
   </section>
 </main>
 
-${renderSiteFooter(SITE_CONFIG.title, getPlatformLabel(c.env))}
+${renderSiteFooter(SITE_CONFIG.title, getPlatformLabel(c.env, c.req.header('host')))}
 
 <script>
 (function () {
@@ -562,7 +561,7 @@ ${H('管理')}
       </section>
     </main>
 
-    ${renderSiteFooter(SITE_CONFIG.title, getPlatformLabel(c.env))}
+    ${renderSiteFooter(SITE_CONFIG.title, getPlatformLabel(c.env, c.req.header('host')))}
   </div>
 </div>
 
