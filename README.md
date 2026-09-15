@@ -174,6 +174,26 @@ https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{lo
 > 已知限制：Express 模式的 API Key 在 `aiplatform.googleapis.com` 通用端点会被 Google 拒绝
 > （`API keys are not supported by this API`），请优先使用服务账号。
 
+## Devin 反代（`devin` 渠道）
+
+复刻 CLIProxyAPI 的 Devin executor + OAuth：
+
+- **授权**：PKCE（无回调的「手动复制授权码」模式，适配 Cloudflare Worker）——
+  点后台「用 Devin 账号授权」→ 在 Devin 页面登录确认 → 页面直接给出授权码 → 粘回弹窗即可
+  自动换取并填入 session token（`devin-session-token$` 前缀）。
+- **调用**：`POST https://server.codeium.com/exa.api_server_pb.ApiServerService/GetChatMessage`，
+  Connect-RPC（`application/connect+proto`）+ protobuf 载荷；响应是 Connect 帧流，
+  逐帧解析出思考 / 正文 / 工具调用 / 用量，再翻译成 OpenAI SSE（含 `reasoning_content`、
+  工具调用分片、`stream_options.include_usage`）。
+- **模型**：Devin 的模型名自带思考档位后缀（如 `swe-2`、`claude-opus-4-6`、`gemini-3-8-flash`，
+  可加 `-high` / `-max` 等）；模型目录运行时从 `models.router-for.me` 拉取并缓存 3 小时，
+  用于把模型名解析成上游 UID。
+- **多账号**：渠道凭据每行一个 session token（或 Devin API Key），随机打散做负载均衡，
+  失败自动切换；响应头 `x-devin-account` 标识实际账号。首帧即鉴权失败时也会切换下一个凭据。
+
+> 注：会话 id 取自请求头 `x-session-id` / `x-conversation-id`（ZCode 等客户端会带），
+> 非 UUID 时按 RFC4122 v5 映射成稳定 UUID，保证多轮对话复用上游会话缓存。
+
 ## OAuth 反代渠道（`claude` / `codex` / `kimi` / `grok`）
 
 参照 CLIProxyAPI 的实现，内置四种 OAuth 反代渠道。渠道 `apiKeys` 里每行一个对应平台的

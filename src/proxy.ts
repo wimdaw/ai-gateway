@@ -430,6 +430,32 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
       })
     }
 
+    // ===== Devin 反代 (type = devin) =====
+    // Connect-RPC + protobuf 直连 server.codeium.com，逐帧翻译成 OpenAI SSE。
+    if (providerType === 'devin') {
+      const supported = ['chat/completions', 'completions', 'messages', 'responses', '']
+      if (!supported.includes(subPath)) {
+        return c.json({
+          error: { message: `devin 渠道暂不支持端点 /v1/${subPath}`, type: 'invalid_request_error' },
+        }, 400)
+      }
+      const { handleDevinRequest } = await import('./devin')
+      return handleDevinRequest({
+        env: c.env,
+        providerId,
+        modelId: modelConfig.id,
+        requestedModel: modelSafe,
+        body: body as Record<string, any>,
+        credentials: enabledKeys.map((k) => k.key),
+        sessionHint: c.req.header('x-session-id') || c.req.header('x-conversation-id') || c.req.header('x-request-id') || '',
+        maskedToken,
+        startedAt,
+        waitUntil: (promise) => {
+          try { c.executionCtx?.waitUntil(promise) } catch { /* 无 executionCtx 的运行时忽略 */ }
+        },
+      })
+    }
+
     // ===== OAuth 反代渠道 (type = claude / codex / kimi / grok / qwen / deepseek，复刻 CLIProxyAPI 等实现) =====
     const OAUTH_TYPES = ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek']
     if (OAUTH_TYPES.includes(providerType)) {

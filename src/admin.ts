@@ -876,3 +876,43 @@ export async function handleVertexVerify(c: Context<{ Bindings: Env }>) {
     result.success ? 200 : 400,
   )
 }
+
+/** Devin 授权：生成 PKCE 授权链接（无回调模式，页面直接给 code） */
+export async function handleDevinOAuthStart(c: Context<{ Bindings: Env }>) {
+  try {
+    const { startDevinOAuth } = await import('./devin')
+    const { url, state } = await startDevinOAuth(c.env)
+    return c.json<ApiResponse<{ url: string; state: string }>>({ success: true, data: { url, state } })
+  } catch (err) {
+    return c.json<ApiResponse>({ success: false, message: (err as Error).message || '生成授权链接失败' }, 500)
+  }
+}
+
+/** Devin 授权：用 code 换 session token 并拉取用户信息 */
+export async function handleDevinOAuthComplete(c: Context<{ Bindings: Env }>) {
+  const { code, state } = await c.req.json<{ code?: string; state?: string }>().catch(() => ({} as { code?: string; state?: string }))
+  if (!code) return c.json<ApiResponse>({ success: false, message: '请填写授权码 code' }, 400)
+  try {
+    const { completeDevinOAuth } = await import('./devin')
+    const result = await completeDevinOAuth(c.env, code, state || '')
+    return c.json<ApiResponse<{ session_token: string; user_name?: string; user_id?: string; org_id?: string }>>({
+      success: true,
+      data: { session_token: result.sessionToken, user_name: result.userName, user_id: result.userId, org_id: result.orgId },
+    })
+  } catch (err) {
+    return c.json<ApiResponse>({ success: false, message: (err as Error).message || '换取 token 失败' }, 400)
+  }
+}
+
+/** 校验 Devin 凭据（GET /v3/self） */
+export async function handleDevinVerify(c: Context<{ Bindings: Env }>) {
+  const body = await c.req.json<{ credential?: string; model?: string }>().catch(() => ({} as { credential?: string; model?: string }))
+  const credential = (body.credential || '').trim()
+  if (!credential) return c.json<ApiResponse<null>>({ success: false, message: '请先填写 session token，或点「用 Devin 账号授权」' }, 400)
+  const { testDevin } = await import('./devin')
+  const result = await testDevin(c.env, credential, body.model?.trim() || undefined)
+  return c.json<ApiResponse<{ message: string }>>(
+    result.success ? { success: true, data: { message: result.message } } : { success: false, message: result.message },
+    result.success ? 200 : 400,
+  )
+}

@@ -25,6 +25,9 @@ import {
   handleAntigravityQuotaAll,
   handleAntigravityAccounts,
   handleVertexVerify,
+  handleDevinOAuthStart,
+  handleDevinOAuthComplete,
+  handleDevinVerify,
   handleOAuthStart,
   handleOAuthComplete,
   handleOAuthPoll,
@@ -108,6 +111,9 @@ app.post('/admin/api/antigravity/models', handleAntigravityModels)
 app.post('/admin/api/antigravity/quota', handleAntigravityQuotaAll)
 app.post('/admin/api/antigravity/accounts', handleAntigravityAccounts)
 app.post('/admin/api/vertex/verify', handleVertexVerify)
+app.post('/admin/api/devin/oauth/start', handleDevinOAuthStart)
+app.post('/admin/api/devin/oauth/complete', handleDevinOAuthComplete)
+app.post('/admin/api/devin/verify', handleDevinVerify)
 
 // OAuth 反代渠道内置授权(claude/codex: 授权链接; kimi/grok: 设备码轮询)
 app.post('/admin/api/oauth/:provider/start', handleOAuthStart)
