@@ -162,6 +162,9 @@ export interface Env {
   ADMIN_USERNAME?: string
   ADMIN_PASSWORD?: string
   OPENCODE_MIRRORS_URL?: string
+  /** Antigravity OAuth 客户端凭据, 经 Worker 密钥下发(wrangler secret put), 不入库 */
+  AG_CLIENT_ID?: string
+  AG_CLIENT_SECRET?: string
 }
 
 /** 备份数据: D1 全量导出(kv_store 配置 + usage_records 用量) */

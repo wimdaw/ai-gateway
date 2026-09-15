@@ -20,8 +20,13 @@ import { addUsageRecord } from './storage'
 import { openAIToGeminiRequest, geminiResponseToOpenAI, createOpenAIStream } from './gemini-translate'
 
 // ===== Antigravity OAuth 客户端（来自 CLIProxyAPI internal/auth/antigravity） =====
-const AG_CLIENT_ID = atob('MTA3MTAwNjA2MDU5MS10bWhzc2luMmgyMWxjcmUyMzV2dG9sb2poNGc0MDNlcC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ==')
-const AG_CLIENT_SECRET = atob('R09DU1BYLUs1OEZXUjQ4NkxkTEoxbUxCOHNYQzRxNkRBZg==')
+// 凭据不入库: 通过 Worker 密钥注入, 先设置再部署
+//   wrangler secret put AG_CLIENT_ID && wrangler secret put AG_CLIENT_SECRET
+function agClientCredential(env: Env, key: 'AG_CLIENT_ID' | 'AG_CLIENT_SECRET'): string {
+  const value = env[key]
+  if (!value) throw new Error(`未配置 ${key}，请先执行 wrangler secret put ${key} 再部署`)
+  return value
+}
 const AG_SCOPES = [
   'https://www.googleapis.com/auth/cloud-platform',
   'https://www.googleapis.com/auth/userinfo.email',
@@ -95,7 +100,7 @@ export async function buildAntigravityAuthUrl(env: Env): Promise<{ url: string; 
   await getKV(env).put(AG_STATE_PREFIX + state, '1', { expirationTtl: 600 })
   const params = new URLSearchParams({
     access_type: 'offline',
-    client_id: AG_CLIENT_ID,
+    client_id: agClientCredential(env, 'AG_CLIENT_ID'),
     prompt: 'consent',
     redirect_uri: AG_REDIRECT_URI,
     response_type: 'code',
@@ -123,8 +128,8 @@ export async function exchangeAntigravityCode(env: Env, codeOrUrl: string, state
   if (!code) throw new Error('未识别到 code，请粘贴 Google 返回的 code 或整段回调地址')
   const form = new URLSearchParams({
     code,
-    client_id: AG_CLIENT_ID,
-    client_secret: AG_CLIENT_SECRET,
+    client_id: agClientCredential(env, 'AG_CLIENT_ID'),
+    client_secret: agClientCredential(env, 'AG_CLIENT_SECRET'),
     redirect_uri: AG_REDIRECT_URI,
     grant_type: 'authorization_code',
   })
@@ -158,8 +163,8 @@ async function getAccessToken(env: Env, refreshToken: string): Promise<string> {
     } catch { /* re-refresh */ }
   }
   const form = new URLSearchParams({
-    client_id: AG_CLIENT_ID,
-    client_secret: AG_CLIENT_SECRET,
+    client_id: agClientCredential(env, 'AG_CLIENT_ID'),
+    client_secret: agClientCredential(env, 'AG_CLIENT_SECRET'),
     refresh_token: refreshToken,
     grant_type: 'refresh_token',
   })

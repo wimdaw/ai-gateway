@@ -401,6 +401,26 @@ export function openAIToGeminiRequest(body: Record<string, any>, opts?: GeminiTr
   const nameMap: Record<string, string> = {}
   const zcodeCompat = !!opts?.zcodeCompat
 
+  // claude / gpt-oss 上游把 functionCall 翻成 tool_use 时强制要求带 id; 而 zcodeCompat 下
+  // 客户端回传的 csg1_* id 承载的是 thought_signature(已单独回填), 不能兼作 tool_use.id,
+  // 故为这类 id 生成配对替代 id。Gemini 上游不需要 id, 保持原行为不做回填。
+  const needsToolId = /claude|gpt-oss/i.test(opts?.modelId || '')
+  const altToolIds = new Map<string, string>()
+  let altToolSeq = 0
+  const upstreamToolId = (rawId: unknown): string | undefined => {
+    if (typeof rawId !== 'string' || !rawId) return undefined
+    const sig = zcodeCompat ? decodeSigId(rawId) : null
+    if (!sig) return rawId
+    if (!needsToolId) return undefined
+    let id = altToolIds.get(rawId)
+    if (!id) {
+      altToolSeq += 1
+      id = `toolu_${altToolSeq.toString(36).padStart(2, '0')}`
+      altToolIds.set(rawId, id)
+    }
+    return id
+  }
+
   // 第一遍：assistant.tool_calls 的 id -> 原始函数名
   const id2name = new Map<string, string>()
   for (const m of messages) {
@@ -458,12 +478,10 @@ export function openAIToGeminiRequest(body: Record<string, any>, opts?: GeminiTr
         const part: GeminiPart = { functionCall: { name: sanitized, args } }
         // zcodeCompat: 从客户端回传的工具调用 id 里解码 thought_signature, 附加到 functionCall
         const sig = zcodeCompat && typeof tc.id === 'string' ? decodeSigId(tc.id) : null
-        if (sig) {
-          part.thoughtSignature = sig
-        } else if (typeof tc.id === 'string' && tc.id) {
-          // 非签名 id 原样回传: claude / gpt-oss 上游要求 tool_use 必须带 id
-          part.functionCall!.id = tc.id
-        }
+        if (sig) part.thoughtSignature = sig
+        // claude / gpt-oss 上游要求 tool_use 必须带 id(签名占用原 id 时用配对替代 id)
+        const toolId = upstreamToolId(tc.id)
+        if (toolId) part.functionCall!.id = toolId
         parts.push(part)
       }
       if (parts.length > 0) contents.push({ role: 'model', parts })
@@ -482,10 +500,9 @@ export function openAIToGeminiRequest(body: Record<string, any>, opts?: GeminiTr
         const respPart: GeminiPart = {
           functionResponse: { name: sanitizeToolName(original), response: { result } },
         }
-        // 与 functionCall 配对: 非签名 id 需要一并回传, 上游据此关联 tool_use / tool_result
-        if (typeof tc.id === 'string' && tc.id && !(zcodeCompat && decodeSigId(tc.id))) {
-          respPart.functionResponse!.id = tc.id
-        }
+        // 与 functionCall 配对: 回传同一个 id, 上游据此关联 tool_use / tool_result
+        const respToolId = upstreamToolId(tc.id)
+        if (respToolId) respPart.functionResponse!.id = respToolId
         responseParts.push(respPart as unknown as GeminiPart)
         }
         if (responseParts.length > 0) contents.push({ role: 'user', parts: responseParts })
