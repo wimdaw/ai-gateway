@@ -5,8 +5,15 @@ import type { Env } from './types'
 
 export async function handleMigrateKvToD1(c: any): Promise<Response> {
   const env = c.env as Env
-  if (!env.DB || !env.KV) {
-    return c.json({ success: false, message: '需要同时存在 DB 和 KV 绑定' })
+  if (!env.DB) {
+    return c.json({ success: false, message: '需要 D1 数据库绑定 (DB)' })
+  }
+  if (!env.KV) {
+    return c.json({
+      success: true,
+      message: '当前为 Pages + D1 纯净部署，无 KV 存储，无需执行迁移。所有数据已直接存储在 D1 中。',
+      data: { migrated: {}, errors: [], errorCount: 0 },
+    })
   }
   const kv = getKV(env) // D1 优先! 这里必须直接读 KV
   const results: Record<string, number> = {}

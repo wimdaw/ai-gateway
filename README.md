@@ -42,10 +42,9 @@ wrangler d1 create ai-gateway-db
 
 ```toml
 name = "ai-gateway"
-main = "src/index.ts"
+pages_build_output_dir = "dist"
 compatibility_date = "2025-07-01"
 compatibility_flags = ["nodejs_compat"]
-keep_vars = true
 
 [[d1_databases]]
 binding = "DB"
@@ -53,59 +52,61 @@ database_name = "ai-gateway-db"
 database_id = "你的 D1 数据库 ID"
 ```
 
-如需 R2 备份功能，额外添加：
+如需 R2 备份功能，请在 Cloudflare 控制台激活 R2 并在后台创建对应 Bucket，之后取消以下注释：
 
 ```toml
-[[r2_buckets]]
-bucket_name = "ai-gateway-backup"
-binding = "ai_gateway_backup"
+# [[r2_buckets]]
+# bucket_name = "ai-gateway-backup"
+# binding = "ai_gateway_backup"
 ```
 
 ### 本地开发
 
 ```bash
 npm install
-npm run dev    # wrangler dev
+npm run dev    # 构建 dist 产物并在本地模拟运行 Pages
 ```
 
 ### 部署
 
 ```bash
-npm run build  # 编译
-npx wrangler deploy  # 部署到 Cloudflare Workers
+npm run deploy:pages  # 打包前端及 Worker 逻辑，并部署至 Cloudflare Pages
 ```
 
-部署后访问 `https://你的域名` 即可看到首页。
+> **注**：本项目采用 Cloudflare Pages Advanced 模式部署（使用打包后的 `_worker.js`），支持动态路由与完整全栈能力。
+
+部署后访问 `https://项目名.pages.dev` 即可看到首页。
 
 ## GitHub Actions 自动部署
 
-本项目支持 GitHub Actions 自动部署。每次推送到 `main` 分支时自动构建并部署。
+本项目支持 GitHub Actions 自动部署。每次推送到 `main` 分支时自动构建并部署到 Cloudflare Pages。
 
 ### 配置步骤
 
 1. Fork 本仓库到你的 GitHub 账号
-
 2. 在 GitHub 仓库 → Settings → Secrets and variables → Actions 中添加：
-   - `CF_API_TOKEN` — Cloudflare API Token（需 Workers 部署权限）
+   - `CF_API_TOKEN` — Cloudflare API Token（需具有 Pages 部署、D1 读取等相关权限）
    - `CF_ACCOUNT_ID` — Cloudflare Account ID
-
-3. 在 `wrangler.toml` 中填入你的 D1 ID
-
-4. 推送代码，Actions 自动部署
+3. 在 `wrangler.toml` 中填好你的 D1 ID
+4. Push 代码，Actions 将自动进行打包并触发 `wrangler pages deploy`
 
 ### 手动触发部署
 
-在 GitHub 仓库 → Actions → Deploy to Cloudflare Workers → Run workflow
+在 GitHub 仓库 → Actions → Deploy to Cloudflare Pages → Run workflow
 
-## 环境变量
+## 环境变量配置
 
-| 变量 | 默认值 | 说明 |
+请通过命令或 Cloudflare Pages 控制台的 **Settings → Environment variables** 进行绑定：
+
+| 变量 / Secrets | 默认值 | 说明 |
 |------|--------|------|
-| `ADMIN_USERNAME` | `admin` | 管理员用户名 |
-| `ADMIN_PASSWORD` | *(空)* | 管理员密码，留空则默认 `admin` |
-| `OPENCODE_MIRRORS_URL` | *(空)* | OpenCode 镜像地址列表，逗号分隔 |
-| `TELEGRAM_BOT_TOKEN` | *(空)* | Telegram Bot Token（用于备份通知） |
-| `TELEGRAM_USER_ID` | *(空)* | Telegram 用户 ID |
+| `ADMIN_USERNAME` | `admin` | 管理后台账号 |
+| `ADMIN_PASSWORD` | `admin` | 管理后台密码 |
+| `AG_CLIENT_ID` | *(空)* | (可选) Antigravity 渠道的 Google OAuth Client ID |
+| `AG_CLIENT_SECRET` | *(空)* | (可选) Antigravity 渠道的 Google OAuth Client Secret |
+| `OPENCODE_MIRRORS_URL` | *(空)* | (可选) OpenCode 全局兜底镜像地址（多行或逗号分隔） |
+
+> **提示**：Telegram 备份功能不在环境变量中配置，请直接登录管理后台的「备份」面板填写 Bot Token 与 User ID。
 
 ## 默认渠道配置
 

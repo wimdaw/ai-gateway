@@ -1,4 +1,5 @@
-name: Deploy to Cloudflare Workers
+name: Deploy to Cloudflare Pages
+
 on:
   push:
     branches: [main]
@@ -9,32 +10,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+
       - run: npm install
-      - run: npm run build
 
-      # 仅生成必需的 wrangler.toml (D1 ID 从 Secrets 读取)
-      - name: Generate wrangler.toml
-        run: |
-          cat > wrangler.toml << 'EOF'
-          name = "ai-gateway"
-          main = "src/index.ts"
-          compatibility_date = "2025-07-01"
-          compatibility_flags = ["nodejs_compat"]
-          keep_vars = true
+      - name: Build for Pages
+        run: npm run build:pages
 
-          [[d1_databases]]
-          binding = "DB"
-          database_name = "ai-gateway-db"
-          database_id = "${{ secrets.D1_DATABASE_ID }}"
-          EOF
-
-      - name: Deploy
+      - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: deploy
+          command: pages deploy dist --project-name ai-gateway --commit-dirty=true

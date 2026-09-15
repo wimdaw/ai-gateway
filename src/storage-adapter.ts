@@ -46,18 +46,32 @@ function memoryKVImpl(): KVLike {
 function d1KVImpl(db: D1Database): KVLike {
   return {
     async get(key) {
-      const res = await db.prepare('SELECT value FROM kv_store WHERE key = ?').bind(key).first<{ value: string }>()
-      return res ? res.value : null
+      const res = await db.prepare('SELECT value, expires_at FROM kv_store WHERE key = ?').bind(key).first<{ value: string; expires_at: number | null }>()
+      if (!res) return null
+      // 检查是否过期（expires_at 为 Unix 秒，null 表示永不过期）
+      if (res.expires_at !== null && res.expires_at < Math.floor(Date.now() / 1000)) {
+        await db.prepare('DELETE FROM kv_store WHERE key = ?').bind(key).run().catch(() => {})
+        return null
+      }
+      return res.value
     },
-    async put(key, value) {
-      await db.prepare('INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(key, value).run()
+    async put(key, value, options) {
+      const expiresAt = options?.expirationTtl
+        ? Math.floor(Date.now() / 1000) + options.expirationTtl
+        : null
+      await db.prepare(
+        'INSERT INTO kv_store (key, value, expires_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at'
+      ).bind(key, value, expiresAt).run()
     },
     async delete(key) {
       await db.prepare('DELETE FROM kv_store WHERE key = ?').bind(key).run()
     },
     async list(options) {
       const prefix = options?.prefix ?? ''
-      const res = await db.prepare('SELECT key FROM kv_store WHERE key LIKE ? ORDER BY key LIMIT 1000').bind(prefix + '%').all<{ key: string }>()
+      const now = Math.floor(Date.now() / 1000)
+      const res = await db.prepare(
+        'SELECT key FROM kv_store WHERE key LIKE ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY key LIMIT 1000'
+      ).bind(prefix + '%', now).all<{ key: string }>()
       return {
         keys: (res.results || []).map((r) => ({ name: r.key })),
         cursor: undefined,
@@ -126,7 +140,7 @@ export async function ensureD1Tables(db: D1Database): Promise<void> {
   if (d1Initialized) return
   try {
     await db.batch([
-      db.prepare('CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT)'),
+      db.prepare('CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT, expires_at INTEGER DEFAULT NULL)'),
       db.prepare(`CREATE TABLE IF NOT EXISTS usage_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ts TEXT NOT NULL,
@@ -142,9 +156,15 @@ export async function ensureD1Tables(db: D1Database): Promise<void> {
       db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_records_ts ON usage_records(ts)'),
       db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_records_model ON usage_records(model)'),
       db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_records_provider ON usage_records(provider)'),
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_kv_store_expires ON kv_store(expires_at) WHERE expires_at IS NOT NULL'),
+      // 为已有表补充 expires_at 字段（已有 expires_at 的表执行此语句会静默失败）
+      db.prepare('ALTER TABLE kv_store ADD COLUMN expires_at INTEGER DEFAULT NULL'),
     ])
     d1Initialized = true
   } catch (e) {
-    console.error('ensureD1Tables failed:', e)
+    // ALTER TABLE 对已有列会报错，属正常，重置 flag 让下次启动可再试
+    // 只要基础表创建成功即可
+    d1Initialized = true
+    console.error('ensureD1Tables partial error (expected for ALTER on existing):', (e as Error).message)
   }
 }

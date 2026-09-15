@@ -6,7 +6,9 @@
     "hono": "^4.12.27"
   },
   "scripts": {
-    "build": "echo ok",
+    "build": "npm run build:pages",
+    "dev": "npm run build:pages && wrangler pages dev dist",
+    "preview": "npm run build:pages && wrangler pages dev dist",
     "build:pages": "mkdir -p dist && cp -f index.html dist/index.html && echo \"{\\\"version\\\": 1, \\\"include\\\": [\\\"/*\\\"], \\\"exclude\\\": []}\" > dist/_routes.json && esbuild src/index.ts --bundle --format=esm --platform=neutral --target=es2022 --outfile=dist/_worker.js",
     "deploy:pages": "npm run build:pages && wrangler pages deploy dist --project-name ai-gateway"
   },

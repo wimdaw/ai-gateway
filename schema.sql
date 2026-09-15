@@ -1,9 +1,11 @@
 -- D1 数据库结构定义 (ai-gateway)
 
 -- 1. 键值存储表 (存放配置、凭据、提供商、ProxyKey 等数据)
+--    expires_at: Unix 秒时间戳，NULL 表示永不过期（参照 KV expirationTtl 语义）
 CREATE TABLE IF NOT EXISTS kv_store (
   key TEXT PRIMARY KEY,
-  value TEXT
+  value TEXT,
+  expires_at INTEGER DEFAULT NULL
 );
 
 -- 2. 用量统计记录表
@@ -24,3 +26,5 @@ CREATE TABLE IF NOT EXISTS usage_records (
 CREATE INDEX IF NOT EXISTS idx_usage_records_ts ON usage_records(ts);
 CREATE INDEX IF NOT EXISTS idx_usage_records_model ON usage_records(model);
 CREATE INDEX IF NOT EXISTS idx_usage_records_provider ON usage_records(provider);
+-- 过期数据清理查询优化
+CREATE INDEX IF NOT EXISTS idx_kv_store_expires ON kv_store(expires_at) WHERE expires_at IS NOT NULL;
