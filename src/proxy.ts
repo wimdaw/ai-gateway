@@ -473,12 +473,12 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
       })
     }
 
-    // ===== OAuth 反代渠道 (type = claude / codex / kimi / grok / qwen / deepseek，复刻 CLIProxyAPI 等实现) =====
-    const OAUTH_TYPES = ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek']
+    // ===== OAuth 反代渠道 (type = claude / codex / kimi / grok / qwen / deepseek / codebuddy) =====
+    const OAUTH_TYPES = ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek', 'codebuddy']
     if (OAUTH_TYPES.includes(providerType)) {
       const supported = providerType === 'claude'
         ? ['chat/completions', 'messages']
-        : providerType === 'kimi' || providerType === 'qwen' || providerType === 'deepseek'
+        : providerType === 'kimi' || providerType === 'qwen' || providerType === 'deepseek' || providerType === 'codebuddy'
           ? ['chat/completions']
           : ['chat/completions', 'responses']
       if (!supported.includes(subPath)) {
@@ -521,6 +521,11 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
       if (providerType === 'deepseek') {
         const { handleDeepSeekRequest } = await import('./deepseek')
         return handleDeepSeekRequest(oauthParams, subPath)
+      }
+      if (providerType === 'codebuddy') {
+        // CodeBuddy(腾讯) 反代：上游强制 stream，非流式由网关本地聚合
+        const { handleCodebuddyRequest } = await import('./codebuddy')
+        return handleCodebuddyRequest(oauthParams, provider.baseUrl)
       }
       const { handleGrokRequest } = await import('./grok')
       return handleGrokRequest({ ...oauthParams, body: subPath === 'responses' ? nativeBody : (body as Record<string, any>) }, subPath === 'responses' ? 'responses-passthrough' : 'translate')

@@ -32,6 +32,7 @@ import {
   handleOAuthComplete,
   handleOAuthPoll,
   handleOAuthModels,
+  handleCodebuddyStatus,
 } from './admin'
 import { renderHomePage, renderLoginPage, renderAdminPage } from './pages'
 import { seedInitialData, getSession } from './storage'
@@ -124,6 +125,9 @@ app.post('/admin/api/oauth/:provider/start', handleOAuthStart)
 app.post('/admin/api/oauth/:provider/complete', handleOAuthComplete)
 app.post('/admin/api/oauth/:provider/poll', handleOAuthPoll)
 app.post('/admin/api/oauth/:provider/models', handleOAuthModels)
+
+// CodeBuddy 账号状态（积分/套餐余额）
+app.post('/admin/api/codebuddy/status', handleCodebuddyStatus)
 
 // ===== 备份/恢复 =====
 app.get('/admin/api/backup/export', handleBackupExport)

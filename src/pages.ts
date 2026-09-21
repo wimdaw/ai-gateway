@@ -442,10 +442,11 @@ ${H('管理')}
             </div>
             <div class="fg"><label for="aurl">API 地址</label><input type="url" id="aurl" placeholder="https://api.deepseek.com"></div>
             <div class="fg" data-hide-ag><label for="amirror">镜像地址</label><textarea id="amirror" rows="3" placeholder="https://opencode.ai.cmliussss.net/zen/v1&#10;每行一个, 留空使用 OPENCODE_MIRRORS_URL 环境变量"></textarea><span class="form-helper">官方地址失败后自动故障转移到的镜像地址，每行一个 URL。</span></div>
-            <div class="fg"><label for="apt">渠道类型</label><select id="apt" class="select-sm" onchange="onTypeChange(this, 'new')"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 兼容</option><option value="openai-video">OpenAI 视频</option><option value="agnes-video">Agnes 异步视频</option><option value="azure-tts">Azure TTS 语音</option><option value="antigravity">Antigravity 反代</option><option value="claude">Claude OAuth 反代</option><option value="codex">ChatGPT (Codex) 反代</option><option value="kimi">Kimi OAuth 反代</option><option value="grok">Grok OAuth 反代</option><option value="qwen">Qwen OAuth 反代</option><option value="deepseek">DeepSeek 反代</option><option value="vertex">Vertex AI 反代</option><option value="devin">Devin 反代</option><option value="zai">Z.AI (GLM 国际)</option></select><span class="form-helper" id="apt-hint-new">Agnes 等聚合平台建议选 OpenAI 兼容, 视频模型自动走异步适配。</span></div>
+            <div class="fg"><label for="apt">渠道类型</label><select id="apt" class="select-sm" onchange="onTypeChange(this, 'new')"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 兼容</option><option value="openai-video">OpenAI 视频</option><option value="agnes-video">Agnes 异步视频</option><option value="azure-tts">Azure TTS 语音</option><option value="antigravity">Antigravity 反代</option><option value="claude">Claude OAuth 反代</option><option value="codex">ChatGPT (Codex) 反代</option><option value="kimi">Kimi OAuth 反代</option><option value="grok">Grok OAuth 反代</option><option value="qwen">Qwen OAuth 反代</option><option value="deepseek">DeepSeek 反代</option><option value="vertex">Vertex AI 反代</option><option value="devin">Devin 反代</option><option value="zai">Z.AI (GLM 国际)</option><option value="codebuddy">CodeBuddy (腾讯) 反代</option></select><span class="form-helper" id="apt-hint-new">Agnes 等聚合平台建议选 OpenAI 兼容, 视频模型自动走异步适配。</span></div>
             <div class="ag-config" id="ag-new" style="display:none"><div class="fg"><label>获取 refresh_token</label><button class="btn btn-s" type="button" onclick="antigravityOAuth('new')"><i class="fas fa-key" aria-hidden="true"></i>用 Google 账号授权</button><span class="form-helper">点开授权：Google 登录并同意后浏览器会跳到 localhost:51121 提示「无法访问」（正常），把地址栏 code= 后面那段粘回弹窗，网关自动换取 refresh_token 并填入下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchAgModels('new')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button><span class="form-helper">用 refresh_token 拉取 Antigravity 可用模型名，追加到下方模型列表。</span></div>
             <div class="ag-config" id="ds-new" style="display:none"><div class="fg"><label>获取 userToken</label><span class="form-helper">两种凭据：① <b>官方 API Key</b>（<code>sk-</code> 开头）→ 直连 api.deepseek.com，免费版可用；② <b>网页 userToken</b>（登录 chat.deepseek.com → F12 → Application → Local Storage → <code>userToken</code>，JWT 约 24h）→ 网页反代，需 Workers Paid（PoW 约 0.3~0.7s CPU，免费版 10ms 上限会失败）。填入下方 API Keys。</span></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyDeepseek('new')"><i class="fas fa-plug" aria-hidden="true"></i>验证 userToken</button></div></div>
-            <div class="ag-config" id="oa-new" style="display:none"><div class="fg"><label>获取凭据</label><button class="btn btn-s" type="button" onclick="oauthChannel('new')"><i class="fas fa-key" aria-hidden="true"></i>授权登录获取 refresh_token</button><span class="form-helper">Claude/ChatGPT 跳转官方授权页（回调到 localhost 属正常，复制地址栏 code）；Kimi/Grok 弹出设备码验证页并自动等待授权。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchOAuthModels('new')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button><span class="form-helper">Claude/Kimi 支持自动拉取模型；Codex/Grok 请手动填写（如 gpt-5.5、grok-4.6）。</span></div></div>
+            <div class="ag-config" id="oa-new" style="display:none"><div class="fg"><label>获取凭据</label><button class="btn btn-s" type="button" onclick="oauthChannel('new')"><i class="fas fa-key" aria-hidden="true"></i>授权登录获取 refresh_token</button><span class="form-helper">Claude/ChatGPT 跳转官方授权页（回调到 localhost 属正常，复制地址栏 code）；Kimi/Grok 弹出设备码验证页并自动等待授权；CodeBuddy 打开腾讯登录页，登录完成后网关自动轮询换取凭据。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchOAuthModels('new')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button><span class="form-helper">Claude/Kimi/CodeBuddy 支持自动拉取模型；Codex/Grok 请手动填写（如 gpt-5.5、grok-4.6）。</span></div></div>
+            <div class="cb-config" id="cb-new" style="display:none"><div class="fg"><label>账号状态</label><button class="btn btn-s" type="button" onclick="codebuddyStatus('new')"><i class="fas fa-coins" aria-hidden="true"></i>查询积分/套餐</button><span class="form-helper">读取该账号的剩余积分与套餐明细（需先在下方 API Keys 填入 refresh_token，或点上方「授权登录」自动获取）。</span></div><div class="mt-1" id="cbst-new" aria-live="polite"></div></div>
             <div class="tts-config" id="tts-new" style="display:none"><fieldset class="form-group"><legend>Azure TTS 音色配置（请求体可临时覆盖）</legend><div class="fr"><div class="fg"><label>音色 Voice</label><div class="tts-voice-row"><select id="av" class="select-sm"><option value="">自定义…</option>${AZURE_VOICE_OPTIONS}</select><button class="btn btn-s" type="button" onclick="previewTts('new')" title="试听当前音色"><i class="fas fa-play" aria-hidden="true"></i>试听</button></div></div><div class="fg"><label>语速 Rate</label><input type="text" id="ar" value="+0%" placeholder="+0%"></div></div><div class="fr"><div class="fg"><label>音量 Volume</label><input type="text" id="avol" value="+0%" placeholder="+0%"></div><div class="fg"><label>音调 Pitch</label><input type="text" id="ap" value="+0Hz" placeholder="+0Hz"></div></div><div class="tts-preview" id="ttp-new"></div><button class="btn btn-s" type="button" onclick="addAllTtsModels('new')"><i class="fas fa-microphone" aria-hidden="true"></i>添加全部音色为模型</button></fieldset></div>
             <fieldset class="form-group"><legend>上游 API Keys</legend><div id="akeys"><div class="fc mb-4 field-row"><input type="text" placeholder="sk-xxx" class="fx1 aki" aria-label="上游 API Key"><label class="tg" title="启用 Key"><input type="checkbox" checked class="ake" aria-label="启用 Key"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)" title="复制 Key" aria-label="复制 Key"><i class="far fa-copy" aria-hidden="true"></i></button><button class="icon-btn" onclick="testNewAKey(this)" title="测试 Key" aria-label="测试 Key"><i class="fas fa-plug" aria-hidden="true"></i></button><button class="icon-btn" onclick="this.parentElement.remove()" title="移除 Key" aria-label="移除 Key"><i class="fas fa-times" aria-hidden="true"></i></button></div></div><div class="fc" style="gap:8px;flex-wrap:wrap"><button class="btn btn-s" onclick="addAKeyRow()"><i class="fas fa-plus" aria-hidden="true"></i>添加 Key</button><button class="btn btn-s" onclick="batchAddKeys()"><i class="fas fa-list" aria-hidden="true"></i>批量添加</button><button class="btn btn-s" onclick="batchTestKeys()"><i class="fas fa-plug" aria-hidden="true"></i>批量测试</button></div></fieldset>
             <aside id="amc" class="hd mdl-list-panel"><div class="panel-heading"><div><span class="panel-heading__mark"><i class="fas fa-cube" aria-hidden="true"></i></span><div><h3>可用模型</h3><p>点击“+”添加到配置。</p></div></div><button class="icon-btn" type="button" onclick="hideMdlPanel('amc')" title="关闭可用模型" aria-label="关闭可用模型"><i class="fas fa-times" aria-hidden="true"></i></button></div><div id="amcl"></div></aside>
@@ -462,19 +463,20 @@ ${H('管理')}
           ${providers.length ? providers.map(p=>`
           <article class="pi" data-id="${escapePageHtml(p.id)}">
             <div class="ps" onclick="tog('${p.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();tog('${p.id}')}" aria-controls="dt-${escapePageHtml(p.id)}">
-              <div class="l"><i class="fas fa-chevron-right provider-chevron" aria-hidden="true" id="ch-${escapePageHtml(p.id)}"></i><span class="provider-avatar" aria-hidden="true">${escapePageHtml(p.name.charAt(0).toUpperCase() || 'A')}</span><div><h3>${escapePageHtml(p.name)}</h3><div class="pu"><code>${escapePageHtml(p.id)}</code><span>${p.type==='antigravity'?'Antigravity':p.type==='claude'?'Claude':p.type==='codex'?'Codex':p.type==='kimi'?'Kimi':p.type==='grok'?'Grok':p.type==='qwen'?'Qwen':p.type==='deepseek'?'DeepSeek':p.type==='vertex'?'Vertex':p.type==='devin'?'Devin':p.type==='zai'?'Z.AI':(p.apiType||'openai')==='anthropic'?'Anthropic':'OpenAI'}</span><span>${p.apiKeys.length} Keys</span><span>${p.models.length} 模型</span></div></div></div>
+              <div class="l"><i class="fas fa-chevron-right provider-chevron" aria-hidden="true" id="ch-${escapePageHtml(p.id)}"></i><span class="provider-avatar" aria-hidden="true">${escapePageHtml(p.name.charAt(0).toUpperCase() || 'A')}</span><div><h3>${escapePageHtml(p.name)}</h3><div class="pu"><code>${escapePageHtml(p.id)}</code><span>${p.type==='antigravity'?'Antigravity':p.type==='claude'?'Claude':p.type==='codex'?'Codex':p.type==='kimi'?'Kimi':p.type==='grok'?'Grok':p.type==='qwen'?'Qwen':p.type==='deepseek'?'DeepSeek':p.type==='vertex'?'Vertex':p.type==='devin'?'Devin':p.type==='codebuddy'?'CodeBuddy':p.type==='zai'?'Z.AI':(p.apiType||'openai')==='anthropic'?'Anthropic':'OpenAI'}</span><span>${p.apiKeys.length} Keys</span><span>${p.models.length} 模型</span></div></div></div>
               <div class="fc fx-s0" onclick="event.stopPropagation()"><label class="tg"><input type="checkbox" ${p.enabled?'checked':''} id="en-${escapePageHtml(p.id)}" onchange="togglePb('${p.id}',this.checked)" aria-label="启用 ${escapePageHtml(p.name)}"><span class="sl"></span></label><span class="bd ${p.enabled?'bd-on':'bd-off'}">${p.enabled?'已启用':'未启用'}</span>${(p.type||'')==='codex'&&codexRelayHost?`<span class="bd bd-info" title="请求经 ${escapePageHtml(codexRelayHost)} 中继转发，未直连 chatgpt.com">经中继</span>`:''}</div>
             </div>
             <div class="pd" id="dt-${escapePageHtml(p.id)}">
-              <div class="detail-heading"><div><h3>编辑 ${escapePageHtml(p.name)}</h3><p>保存后，新配置会用于后续转发请求。${(p.type||'')==='codex'&&codexRelayHost?`该渠道经 <code>${escapePageHtml(codexRelayHost)}</code> 中继转发（本机出口无法直连 chatgpt.com）。`:''}</p></div><span class="protocol-chip">${p.type==='antigravity'?'ANTIGRAVITY':p.type==='claude'?'CLAUDE':p.type==='codex'?'CODEX':p.type==='kimi'?'KIMI':p.type==='grok'?'GROK':p.type==='qwen'?'QWEN':p.type==='deepseek'?'DEEPSEEK':p.type==='vertex'?'VERTEX':p.type==='devin'?'DEVIN':p.type==='zai'?'Z.AI':(p.apiType||'openai')==='anthropic'?'ANTHROPIC':'OPENAI'}</span></div>
+              <div class="detail-heading"><div><h3>编辑 ${escapePageHtml(p.name)}</h3><p>保存后，新配置会用于后续转发请求。${(p.type||'')==='codex'&&codexRelayHost?`该渠道经 <code>${escapePageHtml(codexRelayHost)}</code> 中继转发（本机出口无法直连 chatgpt.com）。`:''}</p></div><span class="protocol-chip">${p.type==='antigravity'?'ANTIGRAVITY':p.type==='claude'?'CLAUDE':p.type==='codex'?'CODEX':p.type==='kimi'?'KIMI':p.type==='grok'?'GROK':p.type==='qwen'?'QWEN':p.type==='deepseek'?'DEEPSEEK':p.type==='vertex'?'VERTEX':p.type==='devin'?'DEVIN':p.type==='codebuddy'?'CODEBUDDY':p.type==='zai'?'Z.AI':(p.apiType||'openai')==='anthropic'?'ANTHROPIC':'OPENAI'}</span></div>
               <div class="fr"><div class="fg"><label>名称</label><input type="text" id="nm-${escapePageHtml(p.id)}" value="${escapePageHtml(p.name)}"></div><div class="fg"><label>ID</label><input type="text" id="pid-${escapePageHtml(p.id)}" value="${escapePageHtml(p.id)}" title="渠道唯一标识, 修改后旧 ID 失效"></div></div>
               <div class="fg"><label>API 地址</label><input type="url" id="url-${escapePageHtml(p.id)}" value="${escapePageHtml(p.baseUrl)}" ${(p.type||'openai')==='azure-tts'?'disabled placeholder="Azure TTS 为内置服务，无需 API 地址"':''}></div>
-              <div class="fr"><div class="fg"><label>渠道类型</label><select id="pt-${escapePageHtml(p.id)}" class="select-sm" onchange="onTypeChange(this, '${escapePageHtml(p.id)}')"><option value="openai" ${(p.type||'openai')==='openai'?'selected':''}>OpenAI 兼容</option><option value="anthropic" ${p.type==='anthropic'?'selected':''}>Anthropic 兼容</option><option value="openai-video" ${p.type==='openai-video'?'selected':''}>OpenAI 视频</option><option value="agnes-video" ${p.type==='agnes-video'?'selected':''}>Agnes 异步视频</option><option value="azure-tts" ${p.type==='azure-tts'?'selected':''}>Azure TTS 语音</option><option value="antigravity" ${p.type==='antigravity'?'selected':''}>Antigravity 反代</option><option value="claude" ${p.type==='claude'?'selected':''}>Claude OAuth 反代</option><option value="codex" ${p.type==='codex'?'selected':''}>ChatGPT (Codex) 反代</option><option value="kimi" ${p.type==='kimi'?'selected':''}>Kimi OAuth 反代</option><option value="grok" ${p.type==='grok'?'selected':''}>Grok OAuth 反代</option><option value="qwen" ${p.type==='qwen'?'selected':''}>Qwen OAuth 反代</option><option value="deepseek" ${p.type==='deepseek'?'selected':''}>DeepSeek 反代</option><option value="vertex" ${p.type==='vertex'?'selected':''}>Vertex AI 反代</option><option value="devin" ${p.type==='devin'?'selected':''}>Devin 反代</option><option value="zai" ${p.type==='zai'?'selected':''}>Z.AI (GLM 国际)</option></select></div></div>
+              <div class="fr"><div class="fg"><label>渠道类型</label><select id="pt-${escapePageHtml(p.id)}" class="select-sm" onchange="onTypeChange(this, '${escapePageHtml(p.id)}')"><option value="openai" ${(p.type||'openai')==='openai'?'selected':''}>OpenAI 兼容</option><option value="anthropic" ${p.type==='anthropic'?'selected':''}>Anthropic 兼容</option><option value="openai-video" ${p.type==='openai-video'?'selected':''}>OpenAI 视频</option><option value="agnes-video" ${p.type==='agnes-video'?'selected':''}>Agnes 异步视频</option><option value="azure-tts" ${p.type==='azure-tts'?'selected':''}>Azure TTS 语音</option><option value="antigravity" ${p.type==='antigravity'?'selected':''}>Antigravity 反代</option><option value="claude" ${p.type==='claude'?'selected':''}>Claude OAuth 反代</option><option value="codex" ${p.type==='codex'?'selected':''}>ChatGPT (Codex) 反代</option><option value="kimi" ${p.type==='kimi'?'selected':''}>Kimi OAuth 反代</option><option value="grok" ${p.type==='grok'?'selected':''}>Grok OAuth 反代</option><option value="qwen" ${p.type==='qwen'?'selected':''}>Qwen OAuth 反代</option><option value="deepseek" ${p.type==='deepseek'?'selected':''}>DeepSeek 反代</option><option value="vertex" ${p.type==='vertex'?'selected':''}>Vertex AI 反代</option><option value="devin" ${p.type==='devin'?'selected':''}>Devin 反代</option><option value="zai" ${p.type==='zai'?'selected':''}>Z.AI (GLM 国际)</option><option value="codebuddy" ${p.type==='codebuddy'?'selected':''}>CodeBuddy (腾讯) 反代</option></select></div></div>
               <div class="ag-config" id="ag-${escapePageHtml(p.id)}" ${p.type==='antigravity'?'':'style="display:none"'}><div class="fg"><label>获取 refresh_token</label><button class="btn btn-s" type="button" onclick="antigravityOAuth('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>用 Google 账号授权</button><span class="form-helper">授权后浏览器跳转 localhost:51121 显示「无法访问」属正常，复制地址栏 code= 后面那一段回来，refresh_token 会自动追加到下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchAgModels('${escapePageHtml(p.id)}')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button></div></div><div class="vx-config" id="vx-${escapePageHtml(p.id)}" style="display:none"><div class="fg"><label>服务账号 JSON</label><textarea id="vxs-${escapePageHtml(p.id)}" rows="4" class="fx1">${escapePageHtml((p.apiKeys||[]).map(k=>k.key).join('\n\n'))}</textarea><span class="form-helper">保存时以本框内容为准（多个账号空行分隔）；也可填 Express API Key。</span></div><div class="fr"><div class="fg"><label>区域 Location</label><input type="text" id="vxl-${escapePageHtml(p.id)}" value="${escapePageHtml(p.location||'')}" placeholder="us-central1"></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyVertex('${escapePageHtml(p.id)}')"><i class="fas fa-plug" aria-hidden="true"></i>验证</button></div></div></div><div class="dv-config" id="dv-${escapePageHtml(p.id)}" style="display:none"><div class="fg"><label>凭据</label><button class="btn btn-s" type="button" onclick="devinOAuth('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>用 Devin 账号授权</button><span class="form-helper">授权成功会自动把 session token 追加到下方凭据框。</span></div><div class="fg"><label>Session Token</label><textarea id="dvt-${escapePageHtml(p.id)}" rows="3" class="fx1">${escapePageHtml((p.apiKeys||[]).map(k=>k.key).join('\n'))}</textarea><span class="form-helper">保存时以本框内容为准（每行一个 session token）。</span></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyDevin('${escapePageHtml(p.id)}')"><i class="fas fa-plug" aria-hidden="true"></i>验证</button></div></div>
             
             
               <div class="ag-config" id="ds-${escapePageHtml(p.id)}" ${p.type==='deepseek'?'':'style="display:none"'}><div class="fg"><label>获取 userToken</label><span class="form-helper">两种凭据：① <b>官方 API Key</b>（<code>sk-</code> 开头）→ 直连 api.deepseek.com，免费版可用；② <b>网页 userToken</b>（chat.deepseek.com 的 localStorage.userToken，JWT 约 24h）→ 网页反代，需 Workers Paid（PoW 约 0.3~0.7s CPU）。填入下方 API Keys。</span></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyDeepseek('${escapePageHtml(p.id)}')"><i class="fas fa-plug" aria-hidden="true"></i>验证 userToken</button></div></div>
-              <div class="ag-config" id="oa-${escapePageHtml(p.id)}" ${['claude','codex','kimi','grok','qwen'].includes(p.type||'')?'':'style="display:none"'}><div class="fg"><label>获取凭据</label><button class="btn btn-s" type="button" onclick="oauthChannel('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>授权登录获取 refresh_token</button><span class="form-helper">Claude/ChatGPT 跳转官方授权页（回调到 localhost 属正常，复制地址栏 code）；Kimi/Grok 弹出设备码验证页并自动等待授权。refresh_token 会追加到下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchOAuthModels('${escapePageHtml(p.id)}')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button></div></div>
+              <div class="ag-config" id="oa-${escapePageHtml(p.id)}" ${['claude','codex','kimi','grok','qwen','codebuddy'].includes(p.type||'')?'':'style="display:none"'}><div class="fg"><label>获取凭据</label><button class="btn btn-s" type="button" onclick="oauthChannel('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>授权登录获取 refresh_token</button><span class="form-helper">Claude/ChatGPT 跳转官方授权页（回调到 localhost 属正常，复制地址栏 code）；Kimi/Grok 弹出设备码验证页并自动等待授权。refresh_token 会追加到下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchOAuthModels('${escapePageHtml(p.id)}')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button></div></div>
+              <div class="cb-config" id="cb-${escapePageHtml(p.id)}" ${p.type==='codebuddy'?'':'style="display:none"'}><div class="fg"><label>账号状态</label><button class="btn btn-s" type="button" onclick="codebuddyStatus('${escapePageHtml(p.id)}')"><i class="fas fa-coins" aria-hidden="true"></i>查询积分/套餐</button><span class="form-helper">读取该账号的剩余积分与套餐明细（取该渠道第一个启用的凭据）。</span></div><div class="mt-1" id="cbst-${escapePageHtml(p.id)}" aria-live="polite"></div></div>
               <div class="tts-config" id="tts-${escapePageHtml(p.id)}" ${(p.type||'openai')==='azure-tts'?'':'style="display:none"'}><fieldset class="form-group"><legend>Azure TTS 音色配置（请求体可临时覆盖）</legend><div class="fr"><div class="fg"><label>音色 Voice</label><div class="tts-voice-row"><select id="pv-${escapePageHtml(p.id)}" class="select-sm"><option value="">自定义…</option>${azureVoiceOptions(p.voice||'zh-CN-XiaoxiaoNeural')}</select><button class="btn btn-s" type="button" onclick="previewTts('${escapePageHtml(p.id)}')" title="试听当前音色"><i class="fas fa-play" aria-hidden="true"></i>试听</button></div></div><div class="fg"><label>语速 Rate</label><input type="text" id="pr-${escapePageHtml(p.id)}" value="${escapePageHtml(p.rate||'+0%')}" placeholder="+0%"></div></div><div class="fr"><div class="fg"><label>音量 Volume</label><input type="text" id="pvol-${escapePageHtml(p.id)}" value="${escapePageHtml(p.volume||'+0%')}" placeholder="+0%"></div><div class="fg"><label>音调 Pitch</label><input type="text" id="pp-${escapePageHtml(p.id)}" value="${escapePageHtml(p.pitch||'+0Hz')}" placeholder="+0Hz"></div></div><div class="tts-preview" id="ttp-${escapePageHtml(p.id)}"></div><div class="fc" style="gap:8px;flex-wrap:wrap"><button class="btn btn-s" type="button" onclick="addTtsModel('${escapePageHtml(p.id)}')" title="把当前选中的音色添加到模型列表"><i class="fas fa-plus" aria-hidden="true"></i>添加模型</button><button class="btn btn-s" type="button" onclick="addAllTtsModels('${escapePageHtml(p.id)}')"><i class="fas fa-microphone" aria-hidden="true"></i>添加全部音色为模型</button></div></fieldset></div>
               <div class="fg" data-hide-ag ${p.type==='antigravity'?'style="display:none"':''}><label>镜像地址</label><textarea id="mir-${escapePageHtml(p.id)}" rows="3" placeholder="每行一个, 留空使用 OPENCODE_MIRRORS_URL 环境变量">${(p.mirrorUrls||[]).map(escapePageHtml).join('\n')}</textarea><span class="form-helper">官方地址失败后自动故障转移到的镜像地址，每行一个 URL。</span></div>
               <fieldset class="form-group"><legend>上游 API Keys</legend><div id="keys-${escapePageHtml(p.id)}">${p.apiKeys.map((k, ki)=>`<div class="fc mb-3 field-row" data-kidx="${ki}"><input type="text" value="${escapePageHtml(k.key)}" class="fx1" id="k-${escapePageHtml(p.id)}-${ki}" placeholder="API Key" aria-label="API Key"><label class="tg"><input type="checkbox" ${k.enabled?'checked':''} id="ken-${escapePageHtml(p.id)}-${ki}" aria-label="启用 Key"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)" title="复制 Key" aria-label="复制 Key"><i class="far fa-copy" aria-hidden="true"></i></button><button class="icon-btn" onclick="testKeyRow('${p.id}',${ki})" title="测试 Key" aria-label="测试 Key"><i class="fas fa-plug" aria-hidden="true"></i></button><button class="icon-btn" onclick="rmKeyRow('${p.id}',${ki})" title="移除 Key" aria-label="移除 Key"><i class="fas fa-times" aria-hidden="true"></i></button></div>`).join('')}</div><div class="fc mt-1 field-row"><input type="text" id="nk-${escapePageHtml(p.id)}" placeholder="新的 API Key" class="fx1"><button class="btn btn-s" onclick="addKeyRow('${p.id}')"><i class="fas fa-plus" aria-hidden="true"></i>添加</button></div></fieldset>
@@ -644,10 +646,11 @@ function showAdd() { document.getElementById('af').classList.remove('hd') }
 function hideAdd() { document.getElementById('af').classList.add('hd'); document.getElementById('amc').classList.add('hd') }
 
 // OAuth 反代渠道的默认 API 地址（网关不实际使用该地址转发，仅作展示/兜底）
-const OAUTH_DEFAULT_URLS = { claude: 'https://api.anthropic.com', codex: 'https://chatgpt.com/backend-api/codex', kimi: 'https://api.kimi.ai/coding', grok: 'https://cli-chat-proxy.grok.com/v1', qwen: 'https://portal.qwen.ai/v1', deepseek: 'https://chat.deepseek.com', zai: 'https://api.z.ai/api/coding/paas/v4' }
-function isOauthType(t) { return ['claude', 'codex', 'kimi', 'grok', 'qwen'].indexOf(t) !== -1 }
+const OAUTH_DEFAULT_URLS = { claude: 'https://api.anthropic.com', codex: 'https://chatgpt.com/backend-api/codex', kimi: 'https://api.kimi.ai/coding', grok: 'https://cli-chat-proxy.grok.com/v1', qwen: 'https://portal.qwen.ai/v1', deepseek: 'https://chat.deepseek.com', zai: 'https://api.z.ai/api/coding/paas/v4', codebuddy: 'https://copilot.tencent.com' }
+function isOauthType(t) { return ['claude', 'codex', 'kimi', 'grok', 'qwen', 'codebuddy'].indexOf(t) !== -1 }
 function isDeepseekType(t) { return t === 'deepseek' }
 function isZaiType(t) { return t === 'zai' }
+function isCodebuddyType(t) { return t === 'codebuddy' }
 
 // 渠道类型切换: azure-tts 显示音色配置, antigravity/OAuth 反代显示授权区; 这些类型都忽略 API 地址
 function onTypeChange(sel, id) {
@@ -663,6 +666,9 @@ function onTypeChange(sel, id) {
   const isDs = isDeepseekType(sel.value)
   const dsBox = document.getElementById('ds-' + id)
   if (dsBox) dsBox.style.display = isDs ? '' : 'none'
+  const isCb = isCodebuddyType(sel.value)
+  const cbBox = document.getElementById('cb-' + id)
+  if (cbBox) cbBox.style.display = isCb ? '' : 'none'
   const vxBox = document.getElementById('vx-' + id)
   if (vxBox) vxBox.style.display = sel.value === 'vertex' ? '' : 'none'
   const dvBox = document.getElementById('dv-' + id)
@@ -681,6 +687,7 @@ function onTypeChange(sel, id) {
       : sel.value === 'grok' ? 'Grok (xAI) 反代: 设备码授权获取 refresh_token, 请求自动翻译成 Responses 协议。'
       : sel.value === 'qwen' ? 'Qwen 反代: 设备码授权获取 refresh_token, OpenAI 兼容直通 (portal.qwen.ai)。'
       : sel.value === 'deepseek' ? 'DeepSeek 反代: 填官方 API Key(sk-, 直连 api.deepseek.com) 或网页 userToken(PoW, 需 Workers Paid)。'
+      : sel.value === 'codebuddy' ? 'CodeBuddy(腾讯) 反代: 点「授权登录」用腾讯账号扫码/登录获取 refresh_token。上游强制流式, 非流式请求由网关自动聚合; API 地址决定区域(含 workbuddy.ai 走国际版)。'
       : sel.value === 'zai' ? 'Z.AI 预设: 填 z.ai 的 API Key(编码套餐)。/v1/messages 自动走 Anthropic 端点, 其余走 OpenAI 端点。'
       : 'Agnes 等聚合平台建议选 OpenAI 兼容, 视频模型自动走异步适配。'
   }
@@ -693,9 +700,11 @@ function onTypeChange(sel, id) {
   if (id === 'new') {
     const url = document.getElementById('aurl')
     if (url) {
-      url.disabled = isTts || isAg || isOa || isDs
+      // codebuddy 的 API 地址用于切换区域(国内版/国际版)，保持可编辑
+      url.disabled = isTts || isAg || (isOa && !isCb) || isDs
       if (isTts) url.value = ''
       else if (isAg) url.value = 'https://daily-cloudcode-pa.googleapis.com'
+      else if (isCb) { if (!url.value) url.value = OAUTH_DEFAULT_URLS.codebuddy }
       else if (isOa || isDs) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
       else if (isZai) url.value = OAUTH_DEFAULT_URLS.zai
       else if (!url.value) url.value = 'https://'
@@ -703,9 +712,10 @@ function onTypeChange(sel, id) {
   } else {
     const url = document.getElementById('url-' + id)
     if (url) {
-      url.disabled = isTts || isAg || isOa || isDs
+      url.disabled = isTts || isAg || (isOa && !isCb) || isDs
       if (isAg && !url.value) url.value = 'https://daily-cloudcode-pa.googleapis.com'
-      if ((isOa || isDs) && !url.value) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
+      if (isCb && !url.value) url.value = OAUTH_DEFAULT_URLS.codebuddy
+      if ((isOa && !isCb || isDs) && !url.value) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
       if (isZai && !url.value) url.value = OAUTH_DEFAULT_URLS.zai
       if (isTts && !url.dataset.orig) url.dataset.orig = url.value
     }
@@ -914,6 +924,17 @@ async function oauthChannel(id) {
           }
         } catch (e) { toast('请求失败', 'error'); oaok.disabled = false }
       }
+    } else if (d.data.mode === 'redirect-poll') {
+      // CodeBuddy(腾讯)：打开登录页，登录完成后网关自动轮询换取 refresh_token（无需复制 code）
+      window.open(d.data.url, '_blank')
+      const realmName = d.data.realm === 'global' ? '国际版 (workbuddy.ai)' : '国内版 (codebuddy.cn)'
+      showM('<h3><i class="fas fa-key c-p"></i> CodeBuddy 授权</h3>'
+        + '<p class="form-helper" style="margin-bottom:8px">已尝试在新窗口打开腾讯登录页（' + realmName + '）。若浏览器拦截了弹窗，请点下面的按钮打开。用你的 CodeBuddy / WorkBuddy 账号完成登录即可，<b>无需复制任何 code</b> —— 登录完成后本页会自动检测并填入 refresh_token。</p>'
+        + '<p style="margin:8px 0"><a class="btn btn-p" href="' + escapeHtml(d.data.url) + '" target="_blank" rel="noreferrer"><i class="fas fa-external-link-alt" aria-hidden="true"></i> 打开登录页</a></p>'
+        + '<div class="fg"><label>授权链接（打不开时复制到浏览器）</label><input type="text" class="fx1" value="' + escapeHtml(d.data.url) + '" readonly onclick="this.select()"></div>'
+        + '<div id="oadev" class="mu"><i class="fas fa-spinner fa-spin"></i> 等待登录完成...</div>'
+        + '<div class="fa"><button class="btn btn-s" onclick="closeM()">取消</button></div>')
+      pollDeviceFlow(provider, d.data.state, id, tr, document.getElementById('oadev'))
     } else {
       // 设备码流程：打开带 user_code 的完整授权链接（缺 user_code 参数时页面会报错），并自动轮询
       const complete = d.data.verification_uri_complete
@@ -964,6 +985,63 @@ async function pollDeviceFlow(provider, state, id, tr, boxEl) {
       }
     } catch (e) {
     }
+  }
+}
+
+// CodeBuddy: 查询账号积分/套餐余额（取渠道第一个启用凭据，或新增态表单里的值）
+async function codebuddyStatus(id) {
+  const tr = document.getElementById(id === 'new' ? 'atestR' : 'tr-' + id)
+  const box = document.getElementById(id === 'new' ? 'cbst-new' : 'cbst-' + id)
+  let key = ''
+  if (id === 'new') {
+    const first = document.querySelector('#akeys .aki')
+    key = first ? first.value.trim() : ''
+  } else {
+    const keys = getKeys(id)
+    key = keys.length > 0 ? keys[0].key : ''
+  }
+  if (!key) { toast('请先填写 refresh_token（或点「授权登录」自动获取）', 'error'); return }
+  if (tr) showSpinner(tr)
+  if (box) box.innerHTML = '<span class="mu"><i class="fas fa-spinner fa-spin"></i> 查询中...</span>'
+  try {
+    const baseEl = document.getElementById(id === 'new' ? 'aurl' : 'url-' + id)
+    const baseUrl = baseEl ? baseEl.value.trim() : ''
+    const r = await fetch('/admin/api/codebuddy/status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: key, baseUrl: baseUrl }),
+    })
+    const d = await r.json()
+    if (tr) showResult(tr, !!(d.success && d.data && d.data.ok), (d.success && d.data && d.data.ok) ? '' : (d.message || (d.data && d.data.message) || '查询失败'))
+    if (!d.success || !d.data || !d.data.ok) {
+      if (box) box.innerHTML = '<span class="c-e">' + escapeHtml(d.message || (d.data && d.data.message) || '查询失败') + '</span>'
+      return
+    }
+    const s = d.data
+    const num = function (v) { return (Number(v) || 0).toLocaleString() }
+    const cell = 'display:inline-block;min-width:96px;color:var(--text-dim,#888);font-size:12px'
+    const val = 'display:inline-block;font-weight:600'
+    let html = '<div style="padding:10px 12px;border:1px solid var(--border,#333);border-radius:8px;margin-top:8px">'
+      + '<div style="margin-bottom:6px"><span style="' + cell + '">账号</span><span style="' + val + '">' + escapeHtml(s.nickname || s.uid || '未知') + '</span></div>'
+      + '<div style="margin-bottom:6px"><span style="' + cell + '">区域</span><span style="' + val + '">' + (s.realm === 'global' ? '国际版 (workbuddy.ai)' : '国内版 (codebuddy.cn)') + '</span></div>'
+      + '<div style="margin-bottom:6px"><span style="' + cell + '">剩余积分</span><span style="' + val + ';color:#22c55e">' + num(s.remain) + '</span></div>'
+      + '<div style="margin-bottom:6px"><span style="' + cell + '">已用 / 总量</span><span style="' + val + '">' + num(s.used) + ' / ' + num(s.size) + '</span></div>'
+      + '<div><span style="' + cell + '">套餐数</span><span style="' + val + '">' + (s.packs || 0) + '</span></div>'
+      + '</div>'
+    if (s.packages && s.packages.length) {
+      const th = 'text-align:left;padding:4px 8px;border-bottom:1px solid var(--border,#333);font-size:12px;color:var(--text-dim,#888)'
+      const td = 'padding:4px 8px;font-size:12px'
+      html += '<table style="border-collapse:collapse;margin-top:8px;width:100%"><thead><tr>'
+        + '<th style="' + th + '">套餐</th><th style="' + th + '">剩余</th><th style="' + th + '">已用</th><th style="' + th + '">总量</th><th style="' + th + '">到期</th>'
+        + '</tr></thead><tbody>'
+      for (const p of s.packages) {
+        html += '<tr><td style="' + td + '">' + escapeHtml(p.name) + '</td><td style="' + td + '">' + num(p.remain) + '</td><td style="' + td + '">' + num(p.used) + '</td><td style="' + td + '">' + num(p.size) + '</td><td style="' + td + '">' + escapeHtml(p.endTime || '-') + '</td></tr>'
+      }
+      html += '</tbody></table>'
+    }
+    if (box) box.innerHTML = html
+  } catch (e) {
+    if (tr) showResult(tr, false, '请求失败')
+    if (box) box.innerHTML = '<span class="c-e">请求失败</span>'
   }
 }
 

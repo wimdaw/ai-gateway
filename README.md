@@ -207,6 +207,7 @@ OAuth refresh_token，网关自动换取/缓存 access_token（KV 缓存、支�
 | `codex` | Codex CLI OAuth（PKCE，授权链接） | `chatgpt.com/backend-api/codex/responses` | OpenAI Responses 协议，自动带 `Chatgpt-Account-Id`；原生 `/v1/responses` 透传 |
 | `kimi` | Kimi 设备码（RFC 8628，**国际站优先**） | `api.kimi.ai/coding/v1/chat/completions` | OpenAI 兼容直通，模型名自动归一化（如 `kimi-k2.8` → `kimi-for-coding`） |
 | `grok` | xAI Grok CLI 设备码（OIDC 发现） | `cli-chat-proxy.grok.com/v1/responses` | OpenAI Responses 协议，带 Grok CLI 身份头；原生 `/v1/responses` 透传 |
+| `codebuddy` | CodeBuddy 设备流（服务端签发 state，打开链接登录后轮询） | `copilot.tencent.com/v2/chat/completions` | 腾讯 CodeBuddy / WorkBuddy 账号；上游强制流式，非流式请求由网关本地聚合 |
 
 ### 配置步骤
 
@@ -221,6 +222,40 @@ OAuth refresh_token，网关自动换取/缓存 access_token（KV 缓存、支�
 
 > 授权入口使用各平台 CLI 的公开 OAuth 客户端（与 CLIProxyAPI 一致）。Codex 对出口 IP 有
 > 地区限制，需部署在 OpenAI 支持的地区（Cloudflare Workers 默认出口通常可用）。
+
+## CodeBuddy 反代（`codebuddy` 渠道，腾讯）
+
+移植自 [Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api) 的上游协议实现（MIT），
+把 **CodeBuddy / WorkBuddy 账号**变成 OpenAI 兼容渠道。上游本身是 OpenAI 兼容协议，
+但有若干硬性要求，网关已全部代为处理：
+
+| 上游要求 | 网关行为 |
+|----------|----------|
+| 拒绝非流式请求 | 出站强制 `stream: true`；客户端要非流式时由网关本地聚合为单条响应 |
+| `tool_choice` 只接受字符串 | 对象形态自动归一（`{"type":"function","function":{"name":"x"}}` → `"x"`） |
+| `role` 白名单不含 `developer` | 自动改写为 `system` |
+| `image_url` 只接受对象形态 | 字符串形态自动包成 `{"url": "..."}` |
+| 只认 `max_tokens`（不认新别名） | `max_completion_tokens` 自动翻译 |
+| `tool_calls` 与 `tool` 结果必须成对 | 自动重排并剔除孤儿项，避免坏历史把整条会话顶死 |
+| DeepSeek 系需显式开思考 | 自动注入 `thinking.type=enabled` + 默认档位，并回填 `reasoning_content` |
+| 桌面端指纹风控 | 出站伪装官方客户端头组（`X-CodeBuddy-Request`、按 uid 派生的 `X-Machine-ID`/`X-Session-ID`、会话头族等） |
+
+**双域**：渠道「API 地址」决定区域 —— 留空或 `https://copilot.tencent.com` 走**国内版**
+（Origin 为 `www.codebuddy.cn`）；填 `https://www.workbuddy.ai` 走**国际版**（平台段 UA 切换为 `WorkBuddy AI`）。
+
+### 配置步骤
+
+1. 后台「添加渠道」→ 渠道类型选 **CodeBuddy (腾讯) 反代** → 点 **「授权登录获取 refresh_token」**：
+   弹出窗口会打开腾讯登录页，**用你的 CodeBuddy / WorkBuddy 账号完成登录即可，无需复制任何 code** ——
+   登录完成后弹窗会自动轮询并把 refresh_token 填入 API Keys。
+2. 点 **「获取模型列表」** 自动拉取可用模型（如 `deepseek-v4.1-flash`）；也可手动填写。
+3. 点 **「查询积分/套餐」** 可查看该账号的剩余积分与套餐明细。
+4. **多账号**：API Keys 每行一个 refresh_token，网关按「健康度 + 随机」轮换，
+   遇 401/403/429/5xx 自动换号。
+
+> ⚠️ 合规提示：该渠道使用 CodeBuddy 账号作为上游，仅限**本人授权账号**在私有环境使用，
+> 请遵守目标平台服务条款。另注意上游有**定时任务类**能力（每日签到、积分领取、token 保活等）
+> 依赖 cron，而 Cloudflare Pages Functions 无 cron 触发器，本网关**不包含**这部分。
 
 ## Qwen 反代（`qwen` 渠道）
 
@@ -340,6 +375,7 @@ src/
 ├── azure-voices.ts   # Azure 音色列表
 ├── gemini-translate.ts # OpenAI <-> Gemini 协议翻译（Antigravity 复用）
 ├── antigravity.ts    # Antigravity 反代（OAuth + 协议翻译 + 可用模型）
+├── codebuddy.ts      # CodeBuddy(腾讯) 反代（设备流授权 + 请求体改写 + SSE 规范化 + 积分查询）
 ```
 
 ## License

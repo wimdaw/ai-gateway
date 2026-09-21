@@ -16,9 +16,12 @@ export interface Provider {
   baseUrl: string
   apiType?: 'openai' | 'anthropic'
   /**
-   * 渠道类型: openai | openai-video | agnes-video | azure-tts | antigravity
-   *          | claude | codex | kimi | grok | qwen (OAuth 反代, 复刻 CLIProxyAPI)
+   * 渠道类型: openai | openai-video | agnes-video | azure-tts | antigravity | vertex | devin
+   *          | claude | codex | kimi | grok | qwen | codebuddy (OAuth 反代, 复刻 CLIProxyAPI)
    *          | deepseek (官方 API Key / 网页 userToken 反代) | zai (Z.AI 预设, 缺省 openai)
+   *
+   * codebuddy: 腾讯 CodeBuddy/WorkBuddy 账号反代（凭据为 refresh_token，上游 /v2/chat/completions
+   *            强制 stream，非流式由网关本地聚合）。baseUrl 含 workbuddy.ai 走国际版，否则国内版。
    */
   type?: string
   apiKeys: ApiKeyEntry[]

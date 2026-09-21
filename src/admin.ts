@@ -32,6 +32,9 @@ import {
 import {
   testDeepSeek, fetchDeepSeekModels,
 } from './deepseek'
+import {
+  startCodebuddyDeviceFlow, pollCodebuddyDeviceFlow, testCodebuddy, fetchCodebuddyModels, fetchCodebuddyStatus,
+} from './codebuddy'
 import { fetchZaiModels } from './zai'
 import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from './opencode'
 import { PROXY_KEY_PREFIX, EXPIRY_OPTIONS, OPENCODE_DEFAULT_URL } from './config'
@@ -258,7 +261,7 @@ export async function handleTestModel(c: Context<{ Bindings: Env }>) {
     ? await testOpenCodeModel(provider.baseUrl, enabledKeys, modelId, resolveProviderMirrorUrls(c.env, provider))
     : ptype === 'antigravity'
       ? await testAntigravityRotating(c.env, enabledKeys.map(k => k.key), modelId, provider.project)
-      : ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek'].includes(ptype)
+      : ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek', 'codebuddy'].includes(ptype)
         ? await testOAuthProviderRotating(c.env, ptype, enabledKeys.map(k => k.key), modelId, provider.baseUrl, provider.id)
         : await testModelConnectionRotating(provider.baseUrl, enabledKeys.map(k => k.key), modelId, provider.apiType)
 
@@ -303,7 +306,7 @@ export async function handleTestKeyNew(c: Context<{ Bindings: Env }>) {
   }
 
   // OAuth 反代渠道: apiKey 即 refresh_token
-  if (providerType && ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek'].includes(providerType)) {
+  if (providerType && ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek', 'codebuddy'].includes(providerType)) {
     const r = await testOAuthProvider(c.env, providerType, apiKey, model || OAUTH_DEFAULT_MODELS[providerType], url, providerId)
     return c.json<ApiResponse>({
       success: true,
@@ -418,7 +421,7 @@ export async function handleTestModelNew(c: Context<{ Bindings: Env }>) {
   }
 
   // OAuth 反代渠道: apiKey 即 refresh_token
-  if (providerType && ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek'].includes(providerType)) {
+  if (providerType && ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek', 'codebuddy'].includes(providerType)) {
     const r = await testOAuthProvider(c.env, providerType, apiKey, model, url, providerId)
     return c.json<ApiResponse>({
       success: true,
@@ -573,7 +576,7 @@ export async function handleAntigravityQuotaAll(c: Context<{ Bindings: Env }>) {
 
 // ===== OAuth 反代渠道内置授权（claude / codex / kimi / grok） =====
 
-const OAUTH_PROVIDERS = new Set(['claude', 'codex', 'kimi', 'grok', 'qwen'])
+const OAUTH_PROVIDERS = new Set(['claude', 'codex', 'kimi', 'grok', 'qwen', 'codebuddy'])
 // 无 OAuth 流程、凭据需从浏览器复制的渠道类型（deepseek 网页版 userToken）
 const MANUAL_TOKEN_PROVIDERS = new Set(['deepseek'])
 
@@ -585,6 +588,7 @@ const OAUTH_DEFAULT_MODELS: Record<string, string> = {
   grok: 'grok-4.6',
   qwen: 'coder-model',
   deepseek: 'deepseek-v4-flash',
+  codebuddy: 'deepseek-v4.1-flash',
 }
 
 interface OAuthPollResult {
@@ -608,6 +612,14 @@ export async function handleOAuthStart(c: Context<{ Bindings: Env }>) {
     if (provider === 'codex') {
       const { url, state } = await buildCodexAuthUrl(c.env)
       return c.json<ApiResponse<{ mode: 'redirect'; url: string; state: string }>>({ success: true, data: { mode: 'redirect', url, state } })
+    }
+    if (provider === 'codebuddy') {
+      // 设备流：上游签发 state + 授权链接，浏览器登录后由 poll 轮询换 token
+      const flow = await startCodebuddyDeviceFlow(c.env, body.baseUrl)
+      return c.json<ApiResponse<{ mode: 'redirect-poll'; url: string; state: string; realm: string }>>({
+        success: true,
+        data: { mode: 'redirect-poll', url: flow.authUrl, state: flow.state, realm: flow.realm },
+      })
     }
     const flow = provider === 'kimi'
       ? await startKimiDeviceFlow(c.env, body.baseUrl)
@@ -653,13 +665,11 @@ export async function handleOAuthPoll(c: Context<{ Bindings: Env }>) {
     return c.json<ApiResponse>({ success: false, message: 'state 为必填项' }, 400)
   }
   try {
-    const r = provider === 'kimi'
-      ? await pollKimiDeviceFlow(c.env, state)
-      : provider === 'qwen'
-        ? await pollQwenDeviceFlow(c.env, state)
-        : provider === 'grok'
-          ? await pollGrokDeviceFlow(c.env, state)
-          : null
+    let r: { status: 'pending' | 'ok' | 'error'; message?: string; refreshToken?: string } | null = null
+    if (provider === 'kimi') r = await pollKimiDeviceFlow(c.env, state)
+    else if (provider === 'qwen') r = await pollQwenDeviceFlow(c.env, state)
+    else if (provider === 'grok') r = await pollGrokDeviceFlow(c.env, state)
+    else if (provider === 'codebuddy') r = await pollCodebuddyDeviceFlow(c.env, state)
     if (!r) {
       return c.json<ApiResponse>({ success: false, message: `${provider} 渠道使用授权链接，请用 complete 接口` }, 400)
     }
@@ -696,6 +706,10 @@ export async function handleOAuthModels(c: Context<{ Bindings: Env }>) {
     const r = fetchDeepSeekModels()
     return c.json<ApiResponse<{ models: string[] }>>({ success: true, data: { models: r.models } })
   }
+  if (provider === 'codebuddy') {
+    const r = await fetchCodebuddyModels(c.env, apiKey, baseUrl)
+    return c.json<ApiResponse<{ models: string[]; message?: string }>>({ success: r.success, data: { models: r.models, message: r.message }, message: r.message })
+  }
   return c.json<ApiResponse>({ success: false, message: `${provider} 渠道请手动填写模型列表` }, 400)
 }
 
@@ -714,6 +728,7 @@ async function testOAuthProvider(
   if (provider === 'grok') return testGrok(env, refreshToken, modelId)
   if (provider === 'qwen') return testQwen(env, refreshToken, modelId)
   if (provider === 'deepseek') return testDeepSeek(env, refreshToken, modelId)
+  if (provider === 'codebuddy') return testCodebuddy(env, refreshToken, modelId, baseUrl)
   return { success: false, message: `未知 OAuth 渠道类型: ${provider}` }
 }
 
@@ -744,6 +759,34 @@ async function testOAuthProviderRotating(
     break
   }
   return last
+}
+
+// ===== CodeBuddy 账号状态（积分/套餐余额） =====
+
+/**
+ * 查询 codebuddy 渠道的账号状态。
+ * 支持两种入参：传 providerId（取该渠道第 index 个启用凭据）+ baseUrl；
+ * 或直接传 refreshToken（新增渠道尚未保存时用表单里的值）。
+ */
+export async function handleCodebuddyStatus(c: Context<{ Bindings: Env }>) {
+  const body = await c.req
+    .json<{ refreshToken?: string; providerId?: string; baseUrl?: string; index?: number }>()
+    .catch(() => ({} as { refreshToken?: string; providerId?: string; baseUrl?: string; index?: number }))
+  let refreshToken = (body.refreshToken || '').trim()
+  let baseUrl = body.baseUrl || ''
+  if (!refreshToken && body.providerId) {
+    const provider = await getProvider(c.env, body.providerId)
+    if (!provider) return c.json<ApiResponse>({ success: false, message: `渠道 "${body.providerId}" 不存在` }, 404)
+    const keys = provider.apiKeys.filter((k) => k.enabled)
+    const idx = Number.isInteger(body.index) ? (body.index as number) : 0
+    refreshToken = (keys[idx]?.key || '').trim()
+    baseUrl = baseUrl || provider.baseUrl
+  }
+  if (!refreshToken) {
+    return c.json<ApiResponse>({ success: false, message: '请先填写 refresh_token，或先保存渠道再查询' }, 400)
+  }
+  const r = await fetchCodebuddyStatus(c.env, refreshToken, baseUrl)
+  return c.json<ApiResponse<typeof r>>({ success: r.ok, data: r, message: r.message })
 }
 
 // ===== 令牌管理 =====
