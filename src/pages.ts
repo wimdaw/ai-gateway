@@ -454,7 +454,7 @@ ${H('管理')}
             <div class="fg" data-hide-ag><label for="amirror">镜像地址</label><textarea id="amirror" rows="3" placeholder="https://opencode.ai.cmliussss.net/zen/v1&#10;每行一个, 留空使用 OPENCODE_MIRRORS_URL 环境变量"></textarea><span class="form-helper">官方地址失败后自动故障转移到的镜像地址，每行一个 URL。</span></div>
             <div class="fg"><label for="apt">渠道类型</label><select id="apt" class="select-sm" onchange="onTypeChange(this, 'new')"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 兼容</option><option value="openai-video">OpenAI 视频</option><option value="agnes-video">Agnes 异步视频</option><option value="azure-tts">Azure TTS 语音</option><option value="antigravity">Antigravity 反代</option><option value="claude">Claude OAuth 反代</option><option value="codex">ChatGPT (Codex) 反代</option><option value="kimi">Kimi OAuth 反代</option><option value="grok">Grok OAuth 反代</option><option value="qwen">Qwen OAuth 反代</option><option value="deepseek">DeepSeek 反代</option><option value="vertex">Vertex AI 反代</option><option value="devin">Devin 反代</option><option value="zai">Z.AI (GLM 国际)</option><option value="codebuddy">CodeBuddy (腾讯) 反代</option></select><span class="form-helper" id="apt-hint-new">Agnes 等聚合平台建议选 OpenAI 兼容, 视频模型自动走异步适配。</span></div>
             <div class="ag-config" id="ag-new" style="display:none"><div class="fg"><label>获取 refresh_token</label><button class="btn btn-s" type="button" onclick="antigravityOAuth('new')"><i class="fas fa-key" aria-hidden="true"></i>用 Google 账号授权</button><span class="form-helper">点开授权：Google 登录并同意后浏览器会跳到 localhost:51121 提示「无法访问」（正常），把地址栏 code= 后面那段粘回弹窗，网关自动换取 refresh_token 并填入下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchAgModels('new')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button><span class="form-helper">用 refresh_token 拉取 Antigravity 可用模型名，追加到下方模型列表。</span></div></div>
-            <div class="ag-config" id="ds-new" style="display:none"><div class="fg"><label>获取 userToken</label><span class="form-helper">两种凭据：① <b>官方 API Key</b>（<code>sk-</code> 开头）→ 直连 api.deepseek.com，免费版可用；② <b>网页 userToken</b>（登录 chat.deepseek.com → F12 → Application → Local Storage → <code>userToken</code>，JWT 约 24h）→ 网页反代，需 Workers Paid（PoW 约 0.3~0.7s CPU，免费版 10ms 上限会失败）。填入下方 API Keys。</span></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyDeepseek('new')"><i class="fas fa-plug" aria-hidden="true"></i>验证 userToken</button></div></div>
+            <div class="ag-config" id="ds-new" style="display:none"><div class="fg"><label>获取 userToken</label><div class="fc field-row" style="gap:8px;flex-wrap:wrap"><button class="btn btn-p btn-s" type="button" onclick="openDeepseekTokenDialog('new')"><i class="fas fa-key" aria-hidden="true"></i>获取并填入凭据</button><button class="btn btn-s" type="button" onclick="verifyDeepseek('new')"><i class="fas fa-plug" aria-hidden="true"></i>验证已填凭据</button></div><span class="form-helper">两种凭据：<b>官方 API Key</b>（<code>sk-</code> 开头）→ 直连 api.deepseek.com，免费版可用；<b>网页 userToken</b>（JWT 约 24h）→ 网页反代，需 Workers Paid（PoW 约 0.3~0.7s CPU）。点左侧按钮会弹出取 token 的分步引导。</span></div></div>
             <div class="ag-config" id="oa-new" style="display:none"><div class="fg"><label>获取凭据</label><button class="btn btn-s" type="button" onclick="oauthChannel('new')"><i class="fas fa-key" aria-hidden="true"></i>授权登录获取 refresh_token</button><span class="form-helper">Claude/ChatGPT 跳转官方授权页（回调到 localhost 属正常，复制地址栏 code）；Kimi/Grok 弹出设备码验证页并自动等待授权；CodeBuddy 打开所选区域(国内版/国际版)的登录页，登录完成后网关自动轮询换取凭据。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchOAuthModels('new')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button><span class="form-helper">Claude/Kimi/CodeBuddy 支持自动拉取模型；Codex/Grok 请手动填写（如 gpt-5.5、grok-4.6）。</span></div></div>
             <div class="cb-config" id="cb-new" style="display:none"><div class="fg"><label for="cbr-new">版本 / 区域</label><select id="cbr-new" class="select-sm" onchange="cbRegionChange('new')"><option value="cn">国内版 · copilot.tencent.com</option><option value="global">国际版 · workbuddy.ai</option></select><span class="form-helper">国内版与国际版是两套互相独立的账号体系，凭据不可混用；切换后上方「API 地址」会自动改成对应域名，授权与转发都按此区域走。</span></div><div class="fg"><label>账号状态</label><button class="btn btn-s" type="button" onclick="codebuddyStatus('new')"><i class="fas fa-coins" aria-hidden="true"></i>查询积分/套餐</button><button class="btn btn-s" type="button" style="margin-left:6px" onclick="codebuddyCheckin('new')"><i class="fas fa-calendar-check" aria-hidden="true"></i>签到</button><span class="form-helper">「查询积分/套餐」读取剩余积分与套餐明细；「签到」执行每日签到（重复签到上游会返回「今日已签到」，按成功处理）。两者都取该渠道第一个启用凭据，需先在下方 API Keys 填入 refresh_token，或点上方「授权登录」自动获取。</span></div><div class="mt-1" id="cbst-new" aria-live="polite"></div></div>
             <div class="tts-config" id="tts-new" style="display:none"><fieldset class="form-group"><legend>Azure TTS 音色配置（请求体可临时覆盖）</legend><div class="fr"><div class="fg"><label>音色 Voice</label><div class="tts-voice-row"><select id="av" class="select-sm"><option value="">自定义…</option>${AZURE_VOICE_OPTIONS}</select><button class="btn btn-s" type="button" onclick="previewTts('new')" title="试听当前音色"><i class="fas fa-play" aria-hidden="true"></i>试听</button></div></div><div class="fg"><label>语速 Rate</label><input type="text" id="ar" value="+0%" placeholder="+0%"></div></div><div class="fr"><div class="fg"><label>音量 Volume</label><input type="text" id="avol" value="+0%" placeholder="+0%"></div><div class="fg"><label>音调 Pitch</label><input type="text" id="ap" value="+0Hz" placeholder="+0Hz"></div></div><div class="tts-preview" id="ttp-new"></div><button class="btn btn-s" type="button" onclick="addAllTtsModels('new')"><i class="fas fa-microphone" aria-hidden="true"></i>添加全部音色为模型</button></fieldset></div>
@@ -484,7 +484,7 @@ ${H('管理')}
               <div class="ag-config" id="ag-${escapePageHtml(p.id)}" ${p.type==='antigravity'?'':'style="display:none"'}><div class="fg"><label>获取 refresh_token</label><button class="btn btn-s" type="button" onclick="antigravityOAuth('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>用 Google 账号授权</button><span class="form-helper">授权后浏览器跳转 localhost:51121 显示「无法访问」属正常，复制地址栏 code= 后面那一段回来，refresh_token 会自动追加到下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchAgModels('${escapePageHtml(p.id)}')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button></div></div><div class="vx-config" id="vx-${escapePageHtml(p.id)}" style="display:none"><div class="fg"><label>服务账号 JSON</label><textarea id="vxs-${escapePageHtml(p.id)}" rows="4" class="fx1">${escapePageHtml((p.apiKeys||[]).map(k=>k.key).join('\n\n'))}</textarea><span class="form-helper">保存时以本框内容为准（多个账号空行分隔）；也可填 Express API Key。</span></div><div class="fr"><div class="fg"><label>区域 Location</label><input type="text" id="vxl-${escapePageHtml(p.id)}" value="${escapePageHtml(p.location||'')}" placeholder="us-central1"></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyVertex('${escapePageHtml(p.id)}')"><i class="fas fa-plug" aria-hidden="true"></i>验证</button></div></div></div><div class="dv-config" id="dv-${escapePageHtml(p.id)}" style="display:none"><div class="fg"><label>凭据</label><button class="btn btn-s" type="button" onclick="devinOAuth('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>用 Devin 账号授权</button><span class="form-helper">授权成功会自动把 session token 追加到下方凭据框。</span></div><div class="fg"><label>Session Token</label><textarea id="dvt-${escapePageHtml(p.id)}" rows="3" class="fx1">${escapePageHtml((p.apiKeys||[]).map(k=>k.key).join('\n'))}</textarea><span class="form-helper">保存时以本框内容为准（每行一个 session token）。</span></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyDevin('${escapePageHtml(p.id)}')"><i class="fas fa-plug" aria-hidden="true"></i>验证</button></div></div>
             
             
-              <div class="ag-config" id="ds-${escapePageHtml(p.id)}" ${p.type==='deepseek'?'':'style="display:none"'}><div class="fg"><label>获取 userToken</label><span class="form-helper">两种凭据：① <b>官方 API Key</b>（<code>sk-</code> 开头）→ 直连 api.deepseek.com，免费版可用；② <b>网页 userToken</b>（chat.deepseek.com 的 localStorage.userToken，JWT 约 24h）→ 网页反代，需 Workers Paid（PoW 约 0.3~0.7s CPU）。填入下方 API Keys。</span></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyDeepseek('${escapePageHtml(p.id)}')"><i class="fas fa-plug" aria-hidden="true"></i>验证 userToken</button></div></div>
+              <div class="ag-config" id="ds-${escapePageHtml(p.id)}" ${p.type==='deepseek'?'':'style="display:none"'}><div class="fg"><label>获取 userToken</label><div class="fc field-row" style="gap:8px;flex-wrap:wrap"><button class="btn btn-p btn-s" type="button" onclick="openDeepseekTokenDialog('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>获取并填入凭据</button><button class="btn btn-s" type="button" onclick="verifyDeepseek('${escapePageHtml(p.id)}')"><i class="fas fa-plug" aria-hidden="true"></i>验证已填凭据</button></div><span class="form-helper">两种凭据：<b>官方 API Key</b>（<code>sk-</code> 开头）→ 直连 api.deepseek.com，免费版可用；<b>网页 userToken</b>（chat.deepseek.com 的 localStorage.userToken，JWT 约 24h）→ 网页反代，需 Workers Paid。点左侧按钮会弹出取 token 的分步引导。</span></div></div>
               <div class="ag-config" id="oa-${escapePageHtml(p.id)}" ${['claude','codex','kimi','grok','qwen','codebuddy'].includes(p.type||'')?'':'style="display:none"'}><div class="fg"><label>获取凭据</label><button class="btn btn-s" type="button" onclick="oauthChannel('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>授权登录获取 refresh_token</button><span class="form-helper">Claude/ChatGPT 跳转官方授权页（回调到 localhost 属正常，复制地址栏 code）；Kimi/Grok 弹出设备码验证页并自动等待授权。refresh_token 会追加到下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchOAuthModels('${escapePageHtml(p.id)}')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button></div></div>
               <div class="cb-config" id="cb-${escapePageHtml(p.id)}" ${p.type==='codebuddy'?'':'style="display:none"'}><div class="fg"><label for="cbr-${escapePageHtml(p.id)}">版本 / 区域</label><select id="cbr-${escapePageHtml(p.id)}" class="select-sm" onchange="cbRegionChange('${escapePageHtml(p.id)}')"><option value="cn" ${cbRealmOf(p)==='cn'?'selected':''}>国内版 · copilot.tencent.com</option><option value="global" ${cbRealmOf(p)==='global'?'selected':''}>国际版 · workbuddy.ai</option></select><span class="form-helper">国内版与国际版是两套互相独立的账号体系，凭据不可混用；切换后上方「API 地址」会自动改成对应域名。若已有凭据属于另一区域，需重新授权。</span></div><div class="fg"><label>账号状态</label><button class="btn btn-s" type="button" onclick="codebuddyStatus('${escapePageHtml(p.id)}')"><i class="fas fa-coins" aria-hidden="true"></i>查询积分/套餐</button><button class="btn btn-s" type="button" style="margin-left:6px" onclick="codebuddyCheckin('${escapePageHtml(p.id)}')"><i class="fas fa-calendar-check" aria-hidden="true"></i>签到</button><span class="form-helper">「查询积分/套餐」读取剩余积分与套餐明细；「签到」执行每日签到（重复签到按「今日已签到」处理，不算失败）。两者都取该渠道第一个启用的凭据。</span></div><div class="mt-1" id="cbst-${escapePageHtml(p.id)}" aria-live="polite"></div></div>
               <div class="tts-config" id="tts-${escapePageHtml(p.id)}" ${(p.type||'openai')==='azure-tts'?'':'style="display:none"'}><fieldset class="form-group"><legend>Azure TTS 音色配置（请求体可临时覆盖）</legend><div class="fr"><div class="fg"><label>音色 Voice</label><div class="tts-voice-row"><select id="pv-${escapePageHtml(p.id)}" class="select-sm"><option value="">自定义…</option>${azureVoiceOptions(p.voice||'zh-CN-XiaoxiaoNeural')}</select><button class="btn btn-s" type="button" onclick="previewTts('${escapePageHtml(p.id)}')" title="试听当前音色"><i class="fas fa-play" aria-hidden="true"></i>试听</button></div></div><div class="fg"><label>语速 Rate</label><input type="text" id="pr-${escapePageHtml(p.id)}" value="${escapePageHtml(p.rate||'+0%')}" placeholder="+0%"></div></div><div class="fr"><div class="fg"><label>音量 Volume</label><input type="text" id="pvol-${escapePageHtml(p.id)}" value="${escapePageHtml(p.volume||'+0%')}" placeholder="+0%"></div><div class="fg"><label>音调 Pitch</label><input type="text" id="pp-${escapePageHtml(p.id)}" value="${escapePageHtml(p.pitch||'+0Hz')}" placeholder="+0Hz"></div></div><div class="tts-preview" id="ttp-${escapePageHtml(p.id)}"></div><div class="fc" style="gap:8px;flex-wrap:wrap"><button class="btn btn-s" type="button" onclick="addTtsModel('${escapePageHtml(p.id)}')" title="把当前选中的音色添加到模型列表"><i class="fas fa-plus" aria-hidden="true"></i>添加模型</button><button class="btn btn-s" type="button" onclick="addAllTtsModels('${escapePageHtml(p.id)}')"><i class="fas fa-microphone" aria-hidden="true"></i>添加全部音色为模型</button></div></fieldset></div>
@@ -1119,6 +1119,116 @@ async function codebuddyCheckin(id) {
   } catch (e) {
     if (tr) showResult(tr, false, '请求失败')
     if (box) box.innerHTML = '<span class="c-e">请求失败</span>'
+  }
+}
+
+// DeepSeek: 引导式弹窗收 userToken（把手抄 localStorage 的步骤降级成「粘一段字符串」）
+function openDeepseekTokenDialog(id) {
+  const already = id === 'new'
+    ? (document.querySelector('#akeys .aki') || {}).value || ''
+    : (getKeys(id)[0] || {}).key || ''
+  showM(
+    '<h3><i class="fas fa-key c-p"></i> 获取并填入 userToken</h3>'
+    + '<p class="form-helper" style="margin-bottom:8px">'
+    + 'userToken 是 DeepSeek 网页版的登录凭据（JWT，约 24 小时过期）。按下面三步取出来，粘到框里即可。'
+    + '</p>'
+    + '<ol class="ds-steps">'
+    + '<li>打开 <a href="https://chat.deepseek.com" target="_blank" rel="noopener noreferrer">chat.deepseek.com</a> 并<b>登录</b>你的账号</li>'
+    + '<li>按 <kbd>F12</kbd> 打开开发者工具 → 切到 <b>Application</b>（中文界面为「应用」）</li>'
+    + '<li>左侧展开 <b>Local Storage</b> → 点 <code>https://chat.deepseek.com</code>，'
+    + '在右侧列表找到 <code>userToken</code>，双击它的值全选复制</li>'
+    + '</ol>'
+    + '<details class="ds-alt"><summary>找不到 userToken？换个位置找（Console 一行命令）</summary>'
+    + '<p class="form-helper" style="margin:8px 0 4px">在开发者工具的 <b>Console</b> 里粘贴下面这行并回车，'
+    + '它会直接把 token 复制到剪贴板：</p>'
+    + '<code class="ds-code">copy(localStorage.getItem(&#39;userToken&#39;))</code>'
+    + '</details>'
+    + '<div class="fg" style="margin-top:10px"><label for="ds-tok">粘贴 userToken</label>'
+    + '<textarea id="ds-tok" rows="4" class="fx1" placeholder="eyJhbGciOi...（以 eyJ 开头的长字符串，或 sk- 开头的官方 API Key）" spellcheck="false"></textarea>'
+    + '<span class="form-helper" id="ds-tok-hint">'
+    + '支持两种凭据：<b>网页 userToken</b>（<code>eyJ…</code>）走网页反代，需 Workers Paid；'
+    + '<b>官方 API Key</b>（<code>sk-…</code>）直连 api.deepseek.com，免费版也能用。'
+    + '</span></div>'
+    + '<div class="fa"><button class="btn btn-s" onclick="closeM()">取消</button>'
+    + '<button class="btn btn-p" id="ds-tok-ok"><i class="fas fa-check" aria-hidden="true"></i> 填入并验证</button></div>'
+  )
+  const ta = document.getElementById('ds-tok')
+  if (ta) {
+    if (already) ta.value = already
+    ta.focus()
+    // 粘贴后即时提示识别到的凭据类型
+    ta.addEventListener('input', function () {
+      const v = ta.value.trim()
+      const hint = document.getElementById('ds-tok-hint')
+      if (!hint) return
+      if (!v) { hint.classList.remove('c-e', 'c-s'); return }
+      const isOfficial = /^sk-[A-Za-z0-9]/.test(v)
+      const isJwt = /^eyJ[A-Za-z0-9_-]*\./.test(v)
+      if (isOfficial) { hint.textContent = '✓ 识别为官方 API Key（sk- 开头）→ 直连 api.deepseek.com，免费版可用'; hint.classList.add('c-s'); hint.classList.remove('c-e') }
+      else if (isJwt) { hint.textContent = '✓ 识别为网页 userToken（JWT）→ 走网页反代，需 Workers Paid'; hint.classList.add('c-s'); hint.classList.remove('c-e') }
+      else { hint.textContent = '⚠ 看起来不像 sk- 开头的 API Key，也不像 eyJ 开头的 JWT，请确认复制完整'; hint.classList.add('c-e'); hint.classList.remove('c-s') }
+    })
+  }
+  const okBtn = document.getElementById('ds-tok-ok')
+  if (okBtn) okBtn.onclick = function () { applyDeepseekToken(id) }
+}
+
+// 把弹窗里的 token 写进渠道的 API Keys 输入框，然后立刻校验
+async function applyDeepseekToken(id) {
+  const ta = document.getElementById('ds-tok')
+  const v = ta ? ta.value.trim() : ''
+  if (!v) { toast('请先粘贴 userToken', 'error'); return }
+  const okBtn = document.getElementById('ds-tok-ok')
+  if (okBtn) { okBtn.disabled = true; okBtn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> 验证中…' }
+
+  // 写入 API Keys 输入框
+  let input = null
+  if (id === 'new') {
+    input = document.querySelector('#akeys .aki')
+    if (!input) { addAKeyRow(); input = document.querySelector('#akeys .aki:last-of-type') }
+  } else {
+    const rows = document.querySelectorAll('#keys-' + id + ' [data-kidx]')
+    if (rows.length > 0) {
+      input = document.getElementById('k-' + id + '-0')
+    } else {
+      // 该渠道还没有 key 行：用「添加」通道建一行，再把值补上
+      const nk = document.getElementById('nk-' + id)
+      if (nk) nk.value = v
+      addKeyRow(id)
+      input = document.getElementById('k-' + id + '-0')
+    }
+  }
+  // 兜底：万一两条路径都没拿到输入框（DOM 结构变动/选择器失效），
+  // 至少把值放到某个可用的 Key 输入里，绝不能静默丢掉用户粘贴的 token。
+  if (!input) {
+    input = document.querySelector('#akeys .aki')
+      || document.querySelector('#keys-' + id + ' input[type="text"]')
+      || document.getElementById('nk-' + id)
+  }
+  if (input) {
+    input.value = v
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  } else {
+    toast('未找到可写入的 API Key 输入框，请手动粘贴', 'error')
+    return
+  }
+
+  // 立即校验
+  let success = false, message = ''
+  try {
+    const r = await testKeyConnection(OAUTH_DEFAULT_URLS.deepseek, 'openai', v, id, '', false, 'deepseek', '')
+    success = r.success; message = r.message || ''
+  } catch (e) { message = '请求失败' }
+
+  if (success) {
+    toast('凭据有效，已填入并保存前请点「保存」', 'success')
+    closeM()
+    const tr = document.getElementById(id === 'new' ? 'atestR' : 'tr-' + id)
+    if (tr) showResult(tr, true, '')
+  } else {
+    // 校验失败也保留填入的值，只提示（避免用户白粘贴一次）
+    if (okBtn) { okBtn.disabled = false; okBtn.innerHTML = '<i class="fas fa-check" aria-hidden="true"></i> 重新验证' }
+    toast('凭据校验未通过：' + (message || '无效'), 'error')
   }
 }
 
