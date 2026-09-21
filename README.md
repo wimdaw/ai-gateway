@@ -241,6 +241,8 @@ OAuth refresh_token，网关自动换取/缓存 access_token（KV 缓存、支�
 | DeepSeek 系需显式开思考 | 自动注入 `thinking.type=enabled` + 默认档位，并回填 `reasoning_content` |
 | 桌面端指纹风控 | 出站伪装官方客户端头组（`X-CodeBuddy-Request`、按 uid 派生的 `X-Machine-ID`/`X-Session-ID`、会话头族等） |
 
+后台还提供 **「查询积分/套餐」** 与 **「签到」** 两个账号运维动作（见下文「每日签到」）。
+
 ### 国内版 / 国际版（两套独立账号体系）
 
 CodeBuddy 与 WorkBuddy 是**两套互相独立的账号体系**，凭据不可混用。渠道配置里有一个
@@ -265,15 +267,45 @@ CodeBuddy 与 WorkBuddy 是**两套互相独立的账号体系**，凭据不可�
    **用对应区域的账号完成登录即可，无需复制任何 code** —— 登录完成后弹窗会自动轮询并把 refresh_token 填入 API Keys。
 3. 点 **「获取模型列表」** 自动拉取可用模型（如 `deepseek-v4.1-flash`）；也可手动填写。
 4. 点 **「查询积分/套餐」** 可查看该账号的剩余积分与套餐明细。
-5. **多账号**：API Keys 每行一个 refresh_token，网关按「健康度 + 随机」轮换，
+5. 点 **「签到」** 可手动执行当日签到（重复签到上游会返回「今日已签到」，按成功处理，不会报错）。
+6. **多账号**：API Keys 每行一个 refresh_token，网关按「健康度 + 随机」轮换，
    遇 401/403/429/5xx 自动换号。
 
 > ⚠️ 一个渠道只能对应一个区域。若要在国内版和国际版各配账号，请**分别建两个渠道**。
 > 切换已有渠道的区域后，原凭据会因属于另一套体系而失效，需重新授权。
 
+### 每日签到（手动 + 定时）
+
+签到走 billing 域的 `POST {billingBase}/v2/billing/meter/daily-checkin`（与积分查询同域同头），
+同样按区域依次尝试候选地址。签完会**顺带刷新一次余额**，后台直接显示最新剩余积分。
+
+- **手动**：渠道配置面板里点「签到」（取该渠道第一个启用凭据）。
+- **定时**：`.github/workflows/checkin.yml` 每天 **09:07（北京时间）** 调用
+  `POST /cron/checkin`，遍历**所有 codebuddy 渠道的全部启用凭据**逐个签到。
+  也可在 Actions 页面手动触发（`workflow_dispatch`）。
+
+定时入口用 **`X-Cron-Token` 头**鉴权，令牌由网关用 `ADMIN_PASSWORD` **单向派生**（HMAC-SHA256）：
+
+```bash
+printf '%s' 'codebuddy-checkin-cron-v1' \
+  | openssl dgst -sha256 -hmac '<管理员密码>' -r | cut -d' ' -f1
+```
+
+把结果写进仓库 Secrets 的 `CHECKIN_CRON_TOKEN` 即可。
+
+> **为什么不直接用管理员密码**：本仓库是 public，而管理员密码往往被复用到别处，
+> 放进 Actions Secrets 的爆炸半径太大。派生令牌**不可反推**原密码，且**权限最小化** ——
+> 只能触发签到，读不到任何渠道配置或 API Key。
+>
+> ⚠️ 修改 `ADMIN_PASSWORD` 后令牌会同步变化，需重新派生并更新 Secret。
+> ⚠️ 未配置 `ADMIN_PASSWORD` 时该入口返回 503（**失败关闭**），不会变成无鉴权接口。
+
+> 定时任务为什么放在 GitHub Actions：**Cloudflare Pages Functions 没有 cron 触发器**。
+> 用 Actions 的 `schedule` 定时 curl 网关接口，无需额外 Worker，也不引入新的运行时。
+> 注意 GitHub 的定时任务在高峰期可能延迟，且仓库连续 60 天无提交活动会被自动停用。
+
 > ⚠️ 合规提示：该渠道使用 CodeBuddy 账号作为上游，仅限**本人授权账号**在私有环境使用，
-> 请遵守目标平台服务条款。另注意上游有**定时任务类**能力（每日签到、积分领取、token 保活等）
-> 依赖 cron，而 Cloudflare Pages Functions 无 cron 触发器，本网关**不包含**这部分。
+> 请遵守目标平台服务条款。上游其余定时任务类能力（积分领取、token 保活等）未实现。
 
 ## Qwen 反代（`qwen` 渠道）
 
@@ -393,7 +425,7 @@ src/
 ├── azure-voices.ts   # Azure 音色列表
 ├── gemini-translate.ts # OpenAI <-> Gemini 协议翻译（Antigravity 复用）
 ├── antigravity.ts    # Antigravity 反代（OAuth + 协议翻译 + 可用模型）
-├── codebuddy.ts      # CodeBuddy(腾讯) 反代（设备流授权 + 请求体改写 + SSE 规范化 + 积分查询）
+├── codebuddy.ts      # CodeBuddy(腾讯) 反代（设备流授权 + 请求体改写 + SSE 规范化 + 积分查询 + 每日签到）
 ```
 
 ## License

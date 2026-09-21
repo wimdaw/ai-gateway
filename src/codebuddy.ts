@@ -84,22 +84,39 @@ const CB_MODELS_PATH_GLOBAL = '/v2/enterprises/personal/models'
 /** 双域通用的模型目录端点（fallback） */
 const CB_V3_CONFIG_PATH = '/v3/config'
 /**
- * 积分/套餐余额端点候选，按序尝试（404 或非业务成功则换下一个）。
+ * billing 域端点候选，按序尝试（404 或非业务成功则换下一个）。
  * CN：billing 走独立域 www.codebuddy.cn，再兜底回 chat 域；
  * Global：以无 /v2 前缀为主，404 时回退带前缀形态。
  */
-interface CbMeterTarget {
+interface CbBillingTarget {
   base: string
   path: string
 }
-const CB_METER_CANDIDATES_CN: CbMeterTarget[] = [
-  { base: 'https://www.codebuddy.cn', path: '/v2/billing/meter/get-user-resource' },
-  { base: 'https://copilot.tencent.com', path: '/v2/billing/meter/get-user-resource' },
-]
-const CB_METER_CANDIDATES_GLOBAL: CbMeterTarget[] = [
-  { base: 'https://www.workbuddy.ai', path: '/billing/meter/get-user-resource' },
-  { base: 'https://www.workbuddy.ai', path: '/v2/billing/meter/get-user-resource' },
-]
+/**
+ * 按区域生成某个 billing 端点的候选列表。
+ * `path` 传 `/meter/xxx` 这样的后缀，函数负责补 `/billing` 与 `/v2/billing` 前缀。
+ */
+function cbBillingTargets(region: CbRegion, path: string): CbBillingTarget[] {
+  if (region.global) {
+    return [
+      { base: 'https://www.workbuddy.ai', path: '/billing' + path },
+      { base: 'https://www.workbuddy.ai', path: '/v2/billing' + path },
+    ]
+  }
+  return [
+    { base: 'https://www.codebuddy.cn', path: '/v2/billing' + path },
+    { base: 'https://copilot.tencent.com', path: '/v2/billing' + path },
+  ]
+}
+const CB_METER_PATH = '/meter/get-user-resource'
+const CB_CHECKIN_PATH = '/meter/daily-checkin'
+const CB_METER_CANDIDATES_CN = cbBillingTargets(CB_CN, CB_METER_PATH)
+const CB_METER_CANDIDATES_GLOBAL = cbBillingTargets(CB_GLOBAL, CB_METER_PATH)
+const CB_CHECKIN_CANDIDATES_CN = cbBillingTargets(CB_CN, CB_CHECKIN_PATH)
+const CB_CHECKIN_CANDIDATES_GLOBAL = cbBillingTargets(CB_GLOBAL, CB_CHECKIN_PATH)
+
+/** 定时签到令牌的派生标签（改这个值会让已下发的令牌全部失效） */
+const CB_CRON_TOKEN_LABEL = 'codebuddy-checkin-cron-v1'
 
 /** KV key 前缀 */
 const CB_AT_PREFIX = 'codebuddy:at:'
@@ -1335,4 +1352,144 @@ export async function fetchCodebuddyStatus(env: Env, refreshToken: string, baseU
   } catch (err) {
     return { ok: false, message: (err as Error).message || '查询失败' }
   }
+}
+
+// =====================================================================
+// 每日签到
+// =====================================================================
+
+export interface CbCheckinResult {
+  ok: boolean
+  message?: string
+  /** 今日已签到（上游把它当业务错误返回，这里识别为成功状态） */
+  already?: boolean
+  realm?: string
+  nickname?: string
+  uid?: string
+  /** 上游回传的本次奖励积分（拿不到就不带） */
+  reward?: number
+  /** 签到后顺带刷出的剩余积分（拿不到就不带） */
+  remain?: number
+}
+
+/** 「今日已签到」判定：上游把重复签到当业务错误返回，需识别为正常状态。 */
+function isAlreadyCheckedIn(msg: string): boolean {
+  const s = (msg || '').toLowerCase()
+  return ['已签到', '签到过', '重复签到', 'already', 'code=10001'].some((m) => s.includes(m.toLowerCase()))
+}
+
+/** 签到后顺带刷新余额（失败不影响签到结论）。 */
+async function attachBalance(
+  env: Env,
+  refreshToken: string,
+  baseUrl: string | undefined,
+  regionCode: string | undefined,
+  res: CbCheckinResult,
+): Promise<CbCheckinResult> {
+  try {
+    const st = await fetchCodebuddyStatus(env, refreshToken, baseUrl, regionCode)
+    if (st.ok) {
+      if (typeof st.remain === 'number') res.remain = st.remain
+      if (!res.nickname && st.nickname) res.nickname = st.nickname
+      if (!res.uid && st.uid) res.uid = st.uid
+    }
+  } catch {
+    /* 余额刷新失败不影响签到结论 */
+  }
+  return res
+}
+
+/**
+ * 每日签到（billing 域 `POST {billingBase}/v2/billing/meter/daily-checkin`，body 为 `{}`）。
+ * 与积分查询同域同头，走 `cbBillingHeaders`。
+ * 「今日已签到」不算失败；签到成功后顺带刷一次余额，方便后台直接展示最新积分。
+ */
+export async function checkinCodebuddy(
+  env: Env,
+  refreshToken: string,
+  baseUrl?: string,
+  regionCode?: string,
+): Promise<CbCheckinResult> {
+  if (!refreshToken) return { ok: false, message: '未填写 refresh_token' }
+  const region = cbRegion(baseUrl, regionCode)
+  const realm = region.global ? 'global' : 'cn'
+  try {
+    const { accessToken, account } = await getCbAccess(env, refreshToken, region)
+    const headers = cbBillingHeaders(region, accessToken, account)
+    const targets = region.global ? CB_CHECKIN_CANDIDATES_GLOBAL : CB_CHECKIN_CANDIDATES_CN
+
+    let lastMsg = ''
+    for (const target of targets) {
+      const res = await fetch(target.base + target.path, {
+        method: 'POST',
+        headers,
+        body: '{}',
+        signal: AbortSignal.timeout(30000),
+      })
+      const text = await res.text()
+      if (res.status === 404) {
+        lastMsg = `HTTP 404: ${text.slice(0, 120)}`
+        continue // 该域/前缀不存在：CN 的 billing 独立域、Global 的 /v2 前缀差异，换下一个候选
+      }
+      let json: any = null
+      try {
+        json = JSON.parse(text)
+      } catch {
+        json = null
+      }
+      const bizMsg = String(json?.msg || json?.message || '')
+
+      if (!res.ok || (json && json.code !== 0)) {
+        // 「已签到」是正常状态，不当失败
+        if (isAlreadyCheckedIn(bizMsg) || isAlreadyCheckedIn(text)) {
+          return attachBalance(env, refreshToken, baseUrl, regionCode, {
+            ok: true,
+            already: true,
+            message: '今日已签到',
+            realm,
+            nickname: account.nickname,
+            uid: account.uid,
+          })
+        }
+        return { ok: false, message: `HTTP ${res.status} code=${json?.code} msg=${bizMsg || text.slice(0, 160)}` }
+      }
+
+      const inner = json?.data?.Response?.Data || json?.data?.data || json?.data || {}
+      const reward = Number(inner?.Reward ?? inner?.Dosage ?? inner?.Credit ?? json?.data?.reward ?? 0) || 0
+      return attachBalance(env, refreshToken, baseUrl, regionCode, {
+        ok: true,
+        message: reward > 0 ? `签到成功，获得 ${reward} 积分` : '签到成功',
+        realm,
+        nickname: account.nickname,
+        uid: account.uid,
+        ...(reward > 0 ? { reward } : {}),
+      })
+    }
+    return { ok: false, message: lastMsg || '签到失败' }
+  } catch (err) {
+    return { ok: false, message: (err as Error).message || '签到失败' }
+  }
+}
+
+/**
+ * 定时签到专用令牌：由 `ADMIN_PASSWORD` **单向派生**（HMAC-SHA256）。
+ *
+ * 为什么这么设计（而不是直接把管理员密码给定时任务）：
+ *  1. 本仓库是 public，把管理员密码写进 GitHub Secrets 风险过大 —— 尤其该密码常被复用到别处；
+ *  2. 派生值不可反推原密码，泄露也拿不到管理员凭据；
+ *  3. 权限最小化：令牌只能触发签到，拿不到任何渠道配置或 Key；
+ *  4. 无需新增 Cloudflare 环境变量（改 env_vars 会覆盖掉不可读的既有 secret）。
+ *
+ * ⚠️ 副作用：**改管理员密码会使令牌同步失效**，需重新更新 GitHub Secret（见 README）。
+ * 未配置 `ADMIN_PASSWORD` 时返回空串，调用方必须**失败关闭**。
+ */
+export async function codebuddyCronToken(env: Env): Promise<string> {
+  const secret = env.ADMIN_PASSWORD || ''
+  if (!secret) return ''
+  const enc = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+  )
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(CB_CRON_TOKEN_LABEL))
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }

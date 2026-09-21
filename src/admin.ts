@@ -34,6 +34,7 @@ import {
 } from './deepseek'
 import {
   startCodebuddyDeviceFlow, pollCodebuddyDeviceFlow, testCodebuddy, fetchCodebuddyModels, fetchCodebuddyStatus,
+  checkinCodebuddy, codebuddyCronToken,
 } from './codebuddy'
 import { fetchZaiModels } from './zai'
 import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from './opencode'
@@ -799,6 +800,130 @@ export async function handleCodebuddyStatus(c: Context<{ Bindings: Env }>) {
     return c.json<ApiResponse>({ success: false, message: '请先填写 refresh_token，或先保存渠道再查询' }, 400)
   }
   const r = await fetchCodebuddyStatus(c.env, refreshToken, baseUrl, region)
+  return c.json<ApiResponse<typeof r>>({ success: r.ok, data: r, message: r.message })
+}
+
+/** 常量时间字符串比较，避免用 `===` 比较令牌时泄露长度/前缀信息。 */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+export interface CbCheckinSummary {
+  total: number
+  ok: number
+  already: number
+  failed: number
+  results: Array<Record<string, unknown>>
+}
+
+/**
+ * 批量签到：遍历**所有** type=codebuddy 渠道的**全部启用凭据**，逐账号签到。
+ * 账号之间间隔 200ms，避免对上游造成瞬时压力。「今日已签到」计入 already 而非 failed。
+ * 后台批量与定时任务共用这一份实现。
+ */
+export async function runCodebuddyCheckinAll(env: Env): Promise<CbCheckinSummary> {
+  const providers = (await getProviders(env)).filter((p) => p.type === 'codebuddy')
+  const results: Array<Record<string, unknown>> = []
+  let ok = 0
+  let already = 0
+  let failed = 0
+  let done = 0
+  for (const p of providers) {
+    const keys = p.apiKeys.filter((k) => k.enabled && (k.key || '').trim())
+    for (let i = 0; i < keys.length; i++) {
+      if (done > 0) await new Promise((res) => setTimeout(res, 200))
+      const r = await checkinCodebuddy(env, keys[i].key.trim(), p.baseUrl, p.region)
+      done++
+      if (r.ok) {
+        if (r.already) already++
+        else ok++
+      } else {
+        failed++
+      }
+      results.push({
+        providerId: p.id,
+        providerName: p.name,
+        index: i,
+        ok: r.ok,
+        already: !!r.already,
+        message: r.message,
+        realm: r.realm,
+        nickname: r.nickname,
+        remain: r.remain,
+      })
+    }
+  }
+  return { total: results.length, ok, already, failed, results }
+}
+
+/**
+ * 定时签到入口（`POST /cron/checkin`）。
+ * 不走管理员会话，改用由 `ADMIN_PASSWORD` 单向派生的**专用令牌**
+ * （`X-Cron-Token` 头，或 `?token=` / body `token`）。
+ * 权限最小化：令牌只能触发签到，拿不到任何渠道配置。未配置 ADMIN_PASSWORD 时**失败关闭**。
+ */
+export async function handleCronCheckin(c: Context<{ Bindings: Env }>) {
+  const expected = await codebuddyCronToken(c.env)
+  if (!expected) {
+    return c.json<ApiResponse>({ success: false, message: '网关未配置 ADMIN_PASSWORD，定时签到不可用' }, 503)
+  }
+  const body = await c.req.json<{ token?: string }>().catch(() => ({} as { token?: string }))
+  const provided = (c.req.header('X-Cron-Token') || c.req.query('token') || body.token || '').trim()
+  if (!provided || !timingSafeEqual(provided, expected)) {
+    return c.json<ApiResponse>({ success: false, message: '令牌无效' }, 401)
+  }
+  const data = await runCodebuddyCheckinAll(c.env)
+  return c.json<ApiResponse<CbCheckinSummary>>({
+    success: true,
+    data,
+    message: data.total === 0
+      ? '没有已配置的 CodeBuddy 渠道（跳过）'
+      : `共 ${data.total} 个账号：新签到 ${data.ok}、已签到 ${data.already}、失败 ${data.failed}`,
+  })
+}
+
+/**
+ * CodeBuddy 每日签到。
+ *  - 单账号：传 `refreshToken`（或 `providerId` + `index`），语义同 /status。
+ *  - 批量：传 `all:true`，遍历所有 type=codebuddy 渠道的**全部启用凭据**。
+ * 「今日已签到」计入 already 而非 failed。
+ */
+export async function handleCodebuddyCheckin(c: Context<{ Bindings: Env }>) {
+  type CbCheckinBody = { refreshToken?: string; providerId?: string; baseUrl?: string; region?: string; index?: number; all?: boolean }
+  const body = await c.req.json<CbCheckinBody>().catch(() => ({} as CbCheckinBody))
+
+  // ===== 批量模式 =====
+  if (body.all) {
+    const data = await runCodebuddyCheckinAll(c.env)
+    return c.json<ApiResponse<CbCheckinSummary>>({
+      success: true,
+      data,
+      message: data.total === 0
+        ? '没有已配置的 CodeBuddy 渠道（跳过）'
+        : `共 ${data.total} 个账号：新签到 ${data.ok}、已签到 ${data.already}、失败 ${data.failed}`,
+    })
+  }
+
+  // ===== 单账号模式 =====
+  let refreshToken = (body.refreshToken || '').trim()
+  let baseUrl = body.baseUrl || ''
+  let region = normalizeRegion(body.region)
+  if (!refreshToken && body.providerId) {
+    const provider = await getProvider(c.env, body.providerId)
+    if (!provider) return c.json<ApiResponse>({ success: false, message: `渠道 "${body.providerId}" 不存在` }, 404)
+    const keys = provider.apiKeys.filter((k) => k.enabled)
+    const idx = Number.isInteger(body.index) ? (body.index as number) : 0
+    refreshToken = (keys[idx]?.key || '').trim()
+    baseUrl = baseUrl || provider.baseUrl
+    region = region || provider.region
+  }
+  if (!refreshToken) {
+    return c.json<ApiResponse>({ success: false, message: '请先填写 refresh_token，或先保存渠道再签到' }, 400)
+  }
+  const r = await checkinCodebuddy(c.env, refreshToken, baseUrl, region)
   return c.json<ApiResponse<typeof r>>({ success: r.ok, data: r, message: r.message })
 }
 

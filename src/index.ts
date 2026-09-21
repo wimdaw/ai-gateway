@@ -33,6 +33,8 @@ import {
   handleOAuthPoll,
   handleOAuthModels,
   handleCodebuddyStatus,
+  handleCodebuddyCheckin,
+  handleCronCheckin,
 } from './admin'
 import { renderHomePage, renderLoginPage, renderAdminPage } from './pages'
 import { seedInitialData, getSession } from './storage'
@@ -128,6 +130,14 @@ app.post('/admin/api/oauth/:provider/models', handleOAuthModels)
 
 // CodeBuddy 账号状态（积分/套餐余额）
 app.post('/admin/api/codebuddy/status', handleCodebuddyStatus)
+
+// CodeBuddy 每日签到（单账号；body.all=true 时遍历全部 codebuddy 渠道，供定时任务）
+app.post('/admin/api/codebuddy/checkin', handleCodebuddyCheckin)
+
+// ===== 定时任务入口（不需要管理员会话）=====
+// 用由 ADMIN_PASSWORD 单向派生的专用令牌鉴权（X-Cron-Token 头），权限最小化：
+// 只能触发签到，拿不到任何渠道配置。见 README「每日签到」。
+app.post('/cron/checkin', handleCronCheckin)
 
 // ===== 备份/恢复 =====
 app.get('/admin/api/backup/export', handleBackupExport)
