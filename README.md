@@ -413,6 +413,31 @@ DeepSeek 网页接口**不支持原生 function calling**，本渠道把 `tools`
 >   以 `error code: 1102` 终止（本账号实测为 Free 套餐，故模式二当前不可用）。
 > - 网页接口非官方 API，存在账号风控风险，且 userToken 约 24 小时过期需重新粘贴。
 
+### 设备身份与 WAF 可达性（已实测）
+
+`src/deepseek-auth-probe.ts` 复刻了 ds-free-api 的设备身份方案，用于诊断（挂 `/admin/api/ds-probe`）：
+
+- **`device_id` 是纯本地派生的**，不需要浏览器：`derive_device_uuid()` 用 FNV-1a 双种子
+  （`fnv1a(seed, 0)` 与 `fnv1a(seed, 0x9e3779b97f4a7c15)`）按 `api_base` 生成 RFC 4122 v4 UUID。
+  同一配置重启后设备身份不变（每次都变会呈现为「无限多个新设备」，本身是风控信号）。
+  本网关默认派生出 `52ef3cfc-f064-4697-8486-78c1b1da336a`。
+- **客户端拟态只是 7 个静态请求头**：除 UA `DeepSeek/2.5.0 Android/35` 外，还带
+  `X-Client-Version`、`X-Client-Platform`、`X-Client-Locale`、`X-Client-Bundle-Id`、
+  `X-Device-Id`、`X-Device-Model`、`X-Client-Timezone-Offset`。全是常量，Workers 里 `fetch` 可直接带。
+
+**WAF 实测结论：Cloudflare 出口 IP 未被拦截。** ds-free-api 文档提到 DeepSeek 的 CloudFront WAF
+会挑战美国出口 IP，而 Workers 出口是全球任播、不可选国家。实测（2026-09-21，出口 `CF-RAY ...-SJC` 圣何塞）：
+
+| 探测目标 | 结果 |
+|---|---|
+| `GET chat.deepseek.com/` | 200，无挑战，367ms |
+| `GET /api/v0/users/current`（无凭据） | 200，业务错误 `{"code":40002,"msg":"Missing Token"}`，331ms |
+| `POST /api/v0/chat/create_pow_challenge`（无凭据） | 200，同上，305ms |
+| 连续 5 次 | 5/5 全部 200，零 WAF 挑战 |
+
+请求完整穿透到业务层（拿到的是业务错误码而非 WAF 拦截页）。因此**「网关代登录换凭据」在技术上可行** ——
+但登录、`check_device` 与自动续期尚未实现，`POST /admin/api/ds-probe/login` 是留给实测用的入口。
+
 配置步骤：类型选 **DeepSeek 反代** → 把 API Key 或 userToken 填入 API Keys →
 点「验证 userToken / API Key」校验。内置模型：`deepseek-v4-flash`、`deepseek-v4-pro`、
 `deepseek-v4-flash-search`、`deepseek-v4-pro-search`（网页模式按其语义映射 `model_type`/`thinking`/`search`）。
