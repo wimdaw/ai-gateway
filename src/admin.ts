@@ -12,6 +12,7 @@ import {
   getUsageSummary,
   getAdminCredentials,
 } from './storage'
+import { getKV } from './storage-adapter'
 import { testModelConnectionRotating } from './proxy'
 import { testAntigravity, testAntigravityRotating, buildAntigravityAuthUrl, exchangeAntigravityCode, fetchAntigravityModels, fetchAntigravityQuota } from './antigravity'
 import {
@@ -811,6 +812,49 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
+// ===== 定时签到的当日节流状态 =====
+
+/** 定时签到状态在 KV 里的键（记录最近一次真正执行的结果，供节流与外部监控读取） */
+const CRON_CHECKIN_STATE_KEY = 'cron:checkin:state'
+/** 上次执行有失败时，多久之后才允许重试（避免外部监控高频 ping 打爆上游） */
+const CRON_CHECKIN_RETRY_COOLDOWN_MS = 30 * 60 * 1000
+
+interface CbCronState {
+  /** 最近一次执行签到的日期（东八区，YYYY-MM-DD） */
+  date: string
+  /** 最近一次执行的 ISO 时间戳 */
+  at: string
+  total: number
+  ok: number
+  already: number
+  failed: number
+}
+
+/**
+ * 取东八区日期串。
+ * 用东八区而不是 UTC，避免「北京凌晨 0–8 点」这段被算成前一天，导致漏签或重复签。
+ */
+function shanghaiDate(d: Date = new Date()): string {
+  return new Date(d.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10)
+}
+
+async function readCronState(env: Env): Promise<CbCronState | null> {
+  try {
+    const raw = await getKV(env).get(CRON_CHECKIN_STATE_KEY)
+    return raw ? (JSON.parse(raw) as CbCronState) : null
+  } catch {
+    return null
+  }
+}
+
+async function writeCronState(env: Env, state: CbCronState): Promise<void> {
+  try {
+    await getKV(env).put(CRON_CHECKIN_STATE_KEY, JSON.stringify(state))
+  } catch {
+    /* 状态写失败不影响签到结论 */
+  }
+}
+
 export interface CbCheckinSummary {
   total: number
   ok: number
@@ -860,10 +904,24 @@ export async function runCodebuddyCheckinAll(env: Env): Promise<CbCheckinSummary
 }
 
 /**
- * 定时签到入口（`POST /cron/checkin`）。
- * 不走管理员会话，改用由 `ADMIN_PASSWORD` 单向派生的**专用令牌**
- * （`X-Cron-Token` 头，或 `?token=` / body `token`）。
- * 权限最小化：令牌只能触发签到，拿不到任何渠道配置。未配置 ADMIN_PASSWORD 时**失败关闭**。
+ * 定时签到入口（`GET|POST /cron/checkin`）。
+ *
+ * 鉴权：不走管理员会话，改用由 `ADMIN_PASSWORD` 单向派生的**专用令牌**
+ * （`X-Cron-Token` 头，或 `?token=`）。权限最小化：令牌只能触发签到，拿不到任何渠道配置。
+ * 未配置 ADMIN_PASSWORD 时**失败关闭**（503）。
+ *
+ * 之所以同时支持 GET：外部存活监控（UptimeRobot / BetterStack 之类）通常只能配一个 URL，
+ * 让它顺手把签到也触发了，就不必额外维护一套定时器。
+ *
+ * **当日节流**（关键）：监控可能几分钟 ping 一次，绝不能每次都真签到。规则：
+ *  - 当天已**全部成功** → 直接跳过，不再打上游；
+ *  - 当天有失败 → 允许重试，但距上次尝试不足 30 分钟则跳过（避免打爆上游）；
+ *  - 还没有任何 CodeBuddy 渠道（total=0）→ 不落状态，每次都很轻量。
+ *
+ * 查询参数：
+ *  - `token=`  令牌（等价于 `X-Cron-Token` 头）
+ *  - `status=1` 只回报状态、不触发签到（人工/监控查看用）
+ *  - `force=1`  忽略当日节流，强制执行一次
  */
 export async function handleCronCheckin(c: Context<{ Bindings: Env }>) {
   const expected = await codebuddyCronToken(c.env)
@@ -875,10 +933,46 @@ export async function handleCronCheckin(c: Context<{ Bindings: Env }>) {
   if (!provided || !timingSafeEqual(provided, expected)) {
     return c.json<ApiResponse>({ success: false, message: '令牌无效' }, 401)
   }
+
+  const today = shanghaiDate()
+  const prev = await readCronState(c.env)
+
+  // 只回报状态，不触发
+  if (c.req.query('status') === '1') {
+    return c.json<ApiResponse<Record<string, unknown>>>({
+      success: true,
+      data: { action: 'status', date: today, last: prev },
+      message: prev
+        ? `最近一次签到：${prev.date}（共 ${prev.total} 个账号，新签到 ${prev.ok}、已签到 ${prev.already}、失败 ${prev.failed}）`
+        : '还没有执行过签到',
+    })
+  }
+
+  const force = c.req.query('force') === '1'
+  if (!force && prev && prev.date === today) {
+    const cooling = prev.failed > 0 && Date.now() - Date.parse(prev.at) < CRON_CHECKIN_RETRY_COOLDOWN_MS
+    if (prev.failed === 0 || cooling) {
+      return c.json<ApiResponse<Record<string, unknown>>>({
+        success: true,
+        data: { action: 'skipped', ...prev, date: today, results: [] },
+        message: prev.failed === 0
+          ? `今日（${today}）已签到，跳过。共 ${prev.total} 个账号：新签到 ${prev.ok}、已签到 ${prev.already}`
+          : `今日已尝试过且刚失败过，${Math.ceil(CRON_CHECKIN_RETRY_COOLDOWN_MS / 60000)} 分钟内不再重试`,
+      })
+    }
+  }
+
   const data = await runCodebuddyCheckinAll(c.env)
-  return c.json<ApiResponse<CbCheckinSummary>>({
+  // 没有任何渠道时不落状态：保持轻量，等用户配好渠道后自然生效
+  if (data.total > 0) {
+    await writeCronState(c.env, {
+      date: today, at: new Date().toISOString(),
+      total: data.total, ok: data.ok, already: data.already, failed: data.failed,
+    })
+  }
+  return c.json<ApiResponse<Record<string, unknown>>>({
     success: true,
-    data,
+    data: { action: 'checkin', date: today, ...data },
     message: data.total === 0
       ? '没有已配置的 CodeBuddy 渠道（跳过）'
       : `共 ${data.total} 个账号：新签到 ${data.ok}、已签到 ${data.already}、失败 ${data.failed}`,

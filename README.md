@@ -284,7 +284,10 @@ CodeBuddy 与 WorkBuddy 是**两套互相独立的账号体系**，凭据不可�
   `POST /cron/checkin`，遍历**所有 codebuddy 渠道的全部启用凭据**逐个签到。
   也可在 Actions 页面手动触发（`workflow_dispatch`）。
 
-定时入口用 **`X-Cron-Token` 头**鉴权，令牌由网关用 `ADMIN_PASSWORD` **单向派生**（HMAC-SHA256）：
+`/cron/checkin` 同时接受 **GET / HEAD / POST**，遍历所有 codebuddy 渠道的全部启用凭据。
+
+定时入口用 **`X-Cron-Token` 头**（或 `?token=`，或 POST body 的 `token` 字段）鉴权，
+令牌由网关用 `ADMIN_PASSWORD` **单向派生**（HMAC-SHA256）：
 
 ```bash
 printf '%s' 'codebuddy-checkin-cron-v1' \
@@ -303,6 +306,46 @@ printf '%s' 'codebuddy-checkin-cron-v1' \
 > 定时任务为什么放在 GitHub Actions：**Cloudflare Pages Functions 没有 cron 触发器**。
 > 用 Actions 的 `schedule` 定时 curl 网关接口，无需额外 Worker，也不引入新的运行时。
 > 注意 GitHub 的定时任务在高峰期可能延迟，且仓库连续 60 天无提交活动会被自动停用。
+
+#### 让外部存活监控顺带触发签到（GET）
+
+外部存活监控（UptimeRobot / BetterStack / 自建 curl 探针等）通常**只能配一个 URL 和一条 GET**，
+不方便额外挂一套定时器。所以 `/cron/checkin` 也支持 GET，直接把监控地址指过来即可：
+
+```bash
+# 外部监控配这个 URL（GET，返回 200 即视为存活）
+https://<你的域名>/cron/checkin?token=<CHECKIN_CRON_TOKEN>
+```
+
+**当日节流**（关键）：监控往往几分钟 ping 一次，绝不能每次都真签到。网关会把最近一次执行结果
+记在 KV（`cron:checkin:state`），规则是：
+
+| 情况 | 行为 |
+|------|------|
+| 当天还没执行过 | 正常签到（`action: "checkin"`） |
+| 当天已**全部成功**（含全部「已签到」） | 直接跳过，**不打上游**（`action: "skipped"`） |
+| 当天有失败，距上次尝试 **< 30 分钟** | 跳过（冷却中） |
+| 当天有失败，距上次尝试 **≥ 30 分钟** | 允许重试 |
+| 还没有任何 CodeBuddy 渠道 | 轻量返回 `total: 0`，**不落状态** |
+
+日期按**东八区**判定，避免北京凌晨 0–8 点被算成前一天而漏签。
+
+跳过时同样返回 **HTTP 200 + `success: true`**（只是 `action: "skipped"`），
+这样监控不会因为「已经签过了」而误报红。
+
+两个查询参数便于人工排查：
+
+```bash
+# 只看状态、不触发（查最近一次签到结果）
+curl -H 'X-Cron-Token: <TOKEN>' 'https://<域名>/cron/checkin?status=1'
+
+# 忽略当日节流，强制执行一次
+curl -H 'X-Cron-Token: <TOKEN>' 'https://<域名>/cron/checkin?force=1'
+```
+
+> 建议：**外部监控 + GitHub Actions 二选一即可**，两者都指向同一个带节流的接口，
+> 同时开着也不会重复签到（Actions 那一次多半会被节流跳过）。
+> 若只保留外部监控，可以把 `.github/workflows/checkin.yml` 停用。
 
 > ⚠️ 合规提示：该渠道使用 CodeBuddy 账号作为上游，仅限**本人授权账号**在私有环境使用，
 > 请遵守目标平台服务条款。上游其余定时任务类能力（积分领取、token 保活等）未实现。
