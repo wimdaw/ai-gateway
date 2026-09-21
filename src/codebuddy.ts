@@ -240,7 +240,7 @@ export async function pollCodebuddyDeviceFlow(env: Env, state: string): Promise<
       headers: { ...cbLoginHeaders(sess.origin), Authorization: 'Bearer ' + accessToken },
       signal: AbortSignal.timeout(20000),
     })
-    const aj = await ar.json().catch(() => null)
+    const aj: any = await ar.json().catch(() => null)
     if (aj && aj.code === 0 && aj.data) {
       account.uid = String(aj.data.uid || '')
       account.enterpriseId = String(aj.data.enterpriseId || '')
