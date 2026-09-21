@@ -392,6 +392,22 @@ DeepSeek **没有官方 OAuth**。该渠道支持两种凭据，按凭据前缀�
 PoW 为纯 JS 实现（`src/deepseek-pow.ts`，Keccak-f[1600] 跳过 round 0，**不是**标准 SHA3-256），
 已用官方向量校验通过；难度 144000 时平均约 0.33 秒、最坏约 0.65 秒纯 CPU。
 
+### 工具调用（Function Calling）支持
+
+DeepSeek 网页接口**不支持原生 function calling**，本渠道把 `tools` 降级成提示词注入实现
+（移植自 `NIyueeE/ds-free-api` 的 `openai_adapter`，见 `src/deepseek-tools.ts`）：
+
+1. **请求侧注入**：把工具定义 + 格式规范 + 行为指令（11 条规则 + 示例）拼成一段系统提示词，
+   只注入一次（标准 ChatML 风格）。工具模式下自动强制开启深度思考（实测显著提升标签遵循度）。
+2. **响应侧解析**：模型按约定用 `<|tool▁calls▁begin|>...<|tool▁calls▁end|>` 包裹 JSON 数组，
+   检测器把它翻译回 OpenAI 的 `tool_calls`，流式下按增量 `arguments` 分片下发，`finish_reason` 置为 `tool_calls`。
+3. **三层 JSON 自修复**：非法转义反斜杠 → 无引号 key → 模型兜底（4 种候选），提升弱模型输出的可用率。
+4. **流式检测器**：滑动窗口缓冲（`SCAN_WINDOW=71`），标签被 chunk 切断也能正确识别；
+   代码围栏（```）内的标签视为示例不解析；未闭合时 `flush` 兜底当正文吐出，不丢内容。
+
+> 说明：标签里的 `▁` 是 **U+2581**（不是下划线），竖线用 **ASCII `|`**。用全角 `｜` 会被上游过滤导致模型混淆。
+> 另：`\name` 这类无法消歧的路径（`\n` 是合法转义）按原算法**不修复**，与 ds-free-api 行为一致。
+
 > ⚠️ **已在线上实测的两点限制**
 > - **需要 Cloudflare Workers Paid 套餐**：PoW 是 CPU 密集计算，免费版 10ms CPU 上限会被运行时
 >   以 `error code: 1102` 终止（本账号实测为 Free 套餐，故模式二当前不可用）。
