@@ -37,6 +37,7 @@ import {
   handleCronCheckin,
 } from './admin'
 import { renderHomePage, renderLoginPage, renderAdminPage } from './pages'
+import { probeDeepSeek, probeDeepSeekLogin } from './deepseek-auth-probe'
 import { seedInitialData, getSession } from './storage'
 import { ensureD1Tables } from './storage-adapter'
 import { handleBackupExport, handleBackupImport, handleBackupToR2, handleBackupList, handleBackupRestore, handleBackupDelete, handleTelegramTest, handleBackupToTelegram } from './backup'
@@ -152,6 +153,33 @@ app.post('/admin/api/backup/restore', handleBackupRestore)
 app.post('/admin/api/backup/delete', handleBackupDelete)
 // Telegram 备份
 app.post('/admin/api/telegram/test', handleTelegramTest)
+
+// ===== DeepSeek 设备身份 / WAF 可达性探针（诊断用，判断「代登录」是否可行） =====
+// GET  只做本地派生 + 无副作用联网探测（不提交任何凭据）
+// POST 传 { email|mobile, password } 才会真实打一次 /users/login（有副作用，慎用）
+app.get('/admin/api/ds-probe', async (c) => {
+  try {
+    return c.json(await probeDeepSeek())
+  } catch (err) {
+    return c.json({ error: { message: (err as Error).message || '探针失败' } }, 500)
+  }
+})
+app.post('/admin/api/ds-probe/login', async (c) => {
+  const body: any = await c.req.json().catch(() => null)
+  if (!body?.password) {
+    return c.json({ error: { message: '需要 password；可选 email 或 mobile(+area_code)' } }, 400)
+  }
+  try {
+    return c.json(await probeDeepSeekLogin({
+      email: body.email,
+      mobile: body.mobile,
+      password: body.password,
+      areaCode: body.area_code,
+    }))
+  } catch (err) {
+    return c.json({ error: { message: (err as Error).message || '登录探测失败' } }, 500)
+  }
+})
 app.post('/admin/api/backup/to-telegram', handleBackupToTelegram)
 
 // ===== API 转发路由（需转发 Key 验证） =====
