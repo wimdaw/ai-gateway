@@ -13,6 +13,9 @@ import {
   handleTestModel,
   handleTestKeyNew,
   handleTestModelNew,
+  handleSaveDsAccount,
+  handleDsLogin,
+  handleClearDsAccount,
   handleGetProxyKeys,
   handleCreateProxyKey,
   handleUpdateProxyKey,
@@ -97,6 +100,10 @@ app.post('/admin/api/providers', handleCreateProvider)
 app.put('/admin/api/providers/:id', handleUpdateProvider)
 app.delete('/admin/api/providers/:id', handleDeleteProvider)
 app.post('/admin/api/providers/:id/test-model', handleTestModel)
+// DeepSeek 账号托管（方案 B：网关代登录换 userToken）
+app.put('/admin/api/providers/:id/ds-account', handleSaveDsAccount)
+app.post('/admin/api/providers/:id/ds-login', handleDsLogin)
+app.delete('/admin/api/providers/:id/ds-account', handleClearDsAccount)
 app.post('/admin/api/test-key', handleTestKeyNew)
 app.post('/admin/api/test-model', handleTestModelNew)
 

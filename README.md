@@ -435,12 +435,65 @@ DeepSeek 网页接口**不支持原生 function calling**，本渠道把 `tools`
 | `POST /api/v0/chat/create_pow_challenge`（无凭据） | 200，同上，305ms |
 | 连续 5 次 | 5/5 全部 200，零 WAF 挑战 |
 
-请求完整穿透到业务层（拿到的是业务错误码而非 WAF 拦截页）。因此**「网关代登录换凭据」在技术上可行** ——
-但登录、`check_device` 与自动续期尚未实现，`POST /admin/api/ds-probe/login` 是留给实测用的入口。
+请求完整穿透到业务层（拿到的是业务错误码而非 WAF 拦截页）。因此**「网关代登录换凭据」在技术上可行**，
+并且已经实现（见下方「两种取凭据方式」）。
 
-配置步骤：类型选 **DeepSeek 反代** → 把 API Key 或 userToken 填入 API Keys →
-点「验证 userToken / API Key」校验。内置模型：`deepseek-v4-flash`、`deepseek-v4-pro`、
+配置步骤：类型选 **DeepSeek 反代** → 用下面两种方式之一拿到凭据填入 API Keys →
+点「验证已填凭据」校验。内置模型：`deepseek-v4-flash`、`deepseek-v4-pro`、
 `deepseek-v4-flash-search`、`deepseek-v4-pro-search`（网页模式按其语义映射 `model_type`/`thinking`/`search`）。
+
+### 两种取凭据方式（方案 A / 方案 B）
+
+DeepSeek 渠道的凭据有两条获取路径，在渠道编辑面板里并排提供，**任选其一**：
+
+| | 方案 A · 粘贴 userToken | 方案 B · 账号代登录 |
+|---|---|---|
+| 操作 | 自己从浏览器 `localStorage.userToken` 抠出来粘贴 | 填邮箱/手机号 + 密码，网关自动登录换取 |
+| 密码是否经手网关 | **否** | **是**（AES-GCM 加密存储） |
+| 有效期 | 约 24h，过期需重贴 | 同左，但可一键重新登录 |
+| 适用 | 不想把密码交出去 | 想省事 / 需要经常续期 |
+
+**方案 A**：点「粘贴 userToken」弹出三步引导（Application → Local Storage → `userToken`），
+并给了一行 Console 兜底命令 `copy(localStorage.getItem('userToken'))`。粘贴框会实时识别凭据类型：
+`sk-` 开头 → 官方 API Key（直连 `api.deepseek.com`，免费版可用）；`eyJ` 开头 → 网页 userToken
+（走反代，PoW 约 0.3~0.7s CPU，需 Workers Paid）。
+
+**方案 B**：点「账号代登录」填写账号密码，网关调用与真实客户端一致的链路：
+
+```
+POST {api_base}/users/login                    → user.token
+POST {api_base}/users/auth_token/check_device  → 若 rotate 非 null 则轮换令牌
+```
+
+要点：
+
+- **请求体与头完全对齐真实客户端**：`{email|mobile, password, area_code, device_id, os}`，
+  另有 7 个 `x-*` 拟态头；`device_id` 由 `api_base` 确定性派生（见上），重启后设备身份不变。
+- **信封判定不能只看 HTTP 状态**：DeepSeek 返回 `{code, msg, data:{biz_code, biz_msg, biz_data}}`，
+  HTTP 200 也可能是业务失败，必须 `code === 0 && biz_code === 0` 才算成功。
+- **`check_device` 失败不阻断登录**（照搬 ds-free-api `pool.rs` 的判断：真实客户端亦非关键路径）。
+- **`rotate` 形态未知**：兼容字符串与 `{"token":"..."}` 对象，其余形态保持原 token。
+- **禁言检测**：登录响应里 `user.chat.is_muted` 为 1/true 时提示账号受限（`mute_until` 一并透传）。
+
+**密码存储**（`src/deepseek-account.ts`）：
+
+- AES-GCM 可逆加密，密钥由 **`ADMIN_PASSWORD` + HKDF** 派生 → **不新增 Cloudflare 环境变量**
+  （改 env_vars 会覆盖既有不可读 secret，风险更大）。
+- 密文格式 `v1.<iv_b64>.<ct_b64>`，IV 每次随机；存的是密文，接口返回值里也会把密文脱敏成
+  `hasPassword` 布尔 + `tokenPreview`（前 8 位 + 后 4 位）。
+- ⚠️ **改管理员密码会使已存密码无法解密** —— 届时网关**失败关闭**并提示重新填写，
+  绝不静默用错密码。UI 上已明确告知这一点，并给出「改用方案 A」的替代出口。
+- ⚠️ 这是「把账号密码托管给网关」的取舍：仅在你信任自己部署的这套网关时启用。
+
+相关接口（均在 `/admin/*` 管理鉴权下）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/admin/api/ds-probe` | 零凭据探测：本地派生 `device_id` + 打 3 个目标看 WAF |
+| `POST` | `/admin/api/ds-probe/login` | 用一次性凭据实测登录（诊断用，有副作用） |
+| `PUT` | `/admin/api/providers/:id/ds-account` | 保存账号（`password` 明文进、密文存；空串=清除） |
+| `POST` | `/admin/api/providers/:id/ds-login` | 代登录换 userToken，成功后写回 `dsAccount.userToken` |
+| `DELETE` | `/admin/api/providers/:id/ds-account` | 清除托管账号（密码与 token 一并删） |
 
 ## Z.AI 预设渠道（`zai` 渠道，智谱 GLM 国际站）
 

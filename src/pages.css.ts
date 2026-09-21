@@ -382,6 +382,9 @@ label, legend { color: var(--color-ink-2); font-size: var(--text-xs); font-weigh
 .ds-alt > summary:hover { color: var(--color-ink-2); }
 .ds-alt > p { margin-inline: var(--space-xs); }
 .ds-code { display: block; margin: 0 var(--space-xs) var(--space-xs); padding: var(--space-2xs) var(--space-xs); border-radius: var(--radius-control); background: var(--color-paper); color: var(--color-ink); font-family: var(--font-mono); font-size: var(--text-xs); overflow-wrap: anywhere; user-select: all; }
+.ds-warn { margin-block-end: var(--space-xs); padding: var(--space-2xs) var(--space-xs); display: flex; gap: var(--space-2xs); align-items: flex-start; border: .0625rem solid var(--color-danger-soft); border-inline-start: .1875rem solid var(--color-danger); border-radius: var(--radius-control); background: var(--color-danger-soft); color: var(--color-danger-ink); font-size: var(--text-xs); line-height: 1.6; }
+.ds-warn i { margin-block-start: .15em; flex: 0 0 auto; }
+.ds-warn code { padding: .1em .35em; border-radius: var(--radius-control); background: var(--color-paper); font-family: var(--font-mono); }
 .mk { margin-block: var(--space-xs); padding: var(--space-sm); border: .0625rem solid var(--color-rule); border-radius: var(--radius-control); background: var(--color-paper-2); color: var(--color-ink); font-family: var(--font-mono); font-size: var(--text-xs); overflow-wrap: anywhere; user-select: all; }
 .mdl-item { min-width: 0; min-height: var(--control-h-sm); padding-inline: var(--space-2xs); display: flex; align-items: center; gap: var(--space-2xs); border: .0625rem solid var(--color-rule); border-radius: var(--radius-control); background: var(--color-paper); color: var(--color-ink-2); font-size: var(--text-xs); }
 .mdl-item .fx1 { min-width: 0; white-space: normal; overflow-wrap: anywhere; }

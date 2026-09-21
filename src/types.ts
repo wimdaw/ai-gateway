@@ -44,6 +44,42 @@ export interface Provider {
   rate?: string
   volume?: string
   pitch?: string
+  /**
+   * DeepSeek 网页版账号(仅 type=deepseek 使用, 可选)。
+   *
+   * 用途：网关**代登录**换取 userToken，免去用户手动从浏览器抠 token。
+   * 密码经 `deepseek-account.ts` 的 AES-GCM 可逆加密后存储(`passwordEnc`)，
+   * 密钥由 `ADMIN_PASSWORD` + HKDF 派生 —— 因此**修改管理员密码会使已存密码失效**，
+   * 届时需重新填写（网关会失败关闭并提示，不会静默用错密码）。
+   *
+   * ⚠️ 这是「把账号密码托管给网关」的取舍：方便 vs 托管风险。仅在你信任
+   *    自己部署的这套网关时启用。留空则完全走「粘贴 userToken」的老路。
+   */
+  dsAccount?: {
+    /** 邮箱（与 mobile 二选一） */
+    email?: string
+    /** 手机号（不含区号） */
+    mobile?: string
+    /** 区号，默认 +86 */
+    areaCode?: string
+    /** 密码密文（v1.<iv>.<ct>），永不明文存 */
+    passwordEnc?: string
+    /** 上次代登录成功拿到的 userToken（明文，另有约 24h 有效期） */
+    userToken?: string
+    /** 上次登录时间(ISO)，成功与失败都记，便于看时间线 */
+    lastLoginAt?: string
+    /** 上次登录结果简述（成功为 ok / 失败为错误摘要），用于 UI 显示 */
+    lastLoginResult?: string
+    /** 上次设备校验是否发生令牌轮换 */
+    lastRotated?: boolean
+    /**
+     * 以下三个字段**仅存在于返回给前端的脱敏视图**（后端 redactProvider 注入），
+     * 存储层不写这三个字段。类型上并列声明以便前端读取。
+     */
+    hasPassword?: boolean
+    tokenSet?: boolean
+    tokenPreview?: string
+  }
   createdAt: string
   updatedAt: string
 }
