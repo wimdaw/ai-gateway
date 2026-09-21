@@ -46,6 +46,16 @@ const escapePageHtml = (value: unknown) => String(value ?? '')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;')
 
+/**
+ * codebuddy 渠道的区域：显式 region 优先，留空时按 baseUrl 判定（与后端 cbRegion 保持同一套规则），
+ * 供编辑面板把「版本 / 区域」下拉回显成已保存的值。
+ */
+const cbRealmOf = (p: { region?: string; baseUrl?: string }): 'cn' | 'global' => {
+  if (p.region === 'global') return 'global'
+  if (p.region === 'cn') return 'cn'
+  return /workbuddy\.ai/i.test(p.baseUrl || '') ? 'global' : 'cn'
+}
+
 const H = (title: string) => `
 <head>
   <meta charset="UTF-8">
@@ -445,8 +455,8 @@ ${H('管理')}
             <div class="fg"><label for="apt">渠道类型</label><select id="apt" class="select-sm" onchange="onTypeChange(this, 'new')"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 兼容</option><option value="openai-video">OpenAI 视频</option><option value="agnes-video">Agnes 异步视频</option><option value="azure-tts">Azure TTS 语音</option><option value="antigravity">Antigravity 反代</option><option value="claude">Claude OAuth 反代</option><option value="codex">ChatGPT (Codex) 反代</option><option value="kimi">Kimi OAuth 反代</option><option value="grok">Grok OAuth 反代</option><option value="qwen">Qwen OAuth 反代</option><option value="deepseek">DeepSeek 反代</option><option value="vertex">Vertex AI 反代</option><option value="devin">Devin 反代</option><option value="zai">Z.AI (GLM 国际)</option><option value="codebuddy">CodeBuddy (腾讯) 反代</option></select><span class="form-helper" id="apt-hint-new">Agnes 等聚合平台建议选 OpenAI 兼容, 视频模型自动走异步适配。</span></div>
             <div class="ag-config" id="ag-new" style="display:none"><div class="fg"><label>获取 refresh_token</label><button class="btn btn-s" type="button" onclick="antigravityOAuth('new')"><i class="fas fa-key" aria-hidden="true"></i>用 Google 账号授权</button><span class="form-helper">点开授权：Google 登录并同意后浏览器会跳到 localhost:51121 提示「无法访问」（正常），把地址栏 code= 后面那段粘回弹窗，网关自动换取 refresh_token 并填入下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchAgModels('new')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button><span class="form-helper">用 refresh_token 拉取 Antigravity 可用模型名，追加到下方模型列表。</span></div></div>
             <div class="ag-config" id="ds-new" style="display:none"><div class="fg"><label>获取 userToken</label><span class="form-helper">两种凭据：① <b>官方 API Key</b>（<code>sk-</code> 开头）→ 直连 api.deepseek.com，免费版可用；② <b>网页 userToken</b>（登录 chat.deepseek.com → F12 → Application → Local Storage → <code>userToken</code>，JWT 约 24h）→ 网页反代，需 Workers Paid（PoW 约 0.3~0.7s CPU，免费版 10ms 上限会失败）。填入下方 API Keys。</span></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyDeepseek('new')"><i class="fas fa-plug" aria-hidden="true"></i>验证 userToken</button></div></div>
-            <div class="ag-config" id="oa-new" style="display:none"><div class="fg"><label>获取凭据</label><button class="btn btn-s" type="button" onclick="oauthChannel('new')"><i class="fas fa-key" aria-hidden="true"></i>授权登录获取 refresh_token</button><span class="form-helper">Claude/ChatGPT 跳转官方授权页（回调到 localhost 属正常，复制地址栏 code）；Kimi/Grok 弹出设备码验证页并自动等待授权；CodeBuddy 打开腾讯登录页，登录完成后网关自动轮询换取凭据。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchOAuthModels('new')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button><span class="form-helper">Claude/Kimi/CodeBuddy 支持自动拉取模型；Codex/Grok 请手动填写（如 gpt-5.5、grok-4.6）。</span></div></div>
-            <div class="cb-config" id="cb-new" style="display:none"><div class="fg"><label>账号状态</label><button class="btn btn-s" type="button" onclick="codebuddyStatus('new')"><i class="fas fa-coins" aria-hidden="true"></i>查询积分/套餐</button><span class="form-helper">读取该账号的剩余积分与套餐明细（需先在下方 API Keys 填入 refresh_token，或点上方「授权登录」自动获取）。</span></div><div class="mt-1" id="cbst-new" aria-live="polite"></div></div>
+            <div class="ag-config" id="oa-new" style="display:none"><div class="fg"><label>获取凭据</label><button class="btn btn-s" type="button" onclick="oauthChannel('new')"><i class="fas fa-key" aria-hidden="true"></i>授权登录获取 refresh_token</button><span class="form-helper">Claude/ChatGPT 跳转官方授权页（回调到 localhost 属正常，复制地址栏 code）；Kimi/Grok 弹出设备码验证页并自动等待授权；CodeBuddy 打开所选区域(国内版/国际版)的登录页，登录完成后网关自动轮询换取凭据。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchOAuthModels('new')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button><span class="form-helper">Claude/Kimi/CodeBuddy 支持自动拉取模型；Codex/Grok 请手动填写（如 gpt-5.5、grok-4.6）。</span></div></div>
+            <div class="cb-config" id="cb-new" style="display:none"><div class="fg"><label for="cbr-new">版本 / 区域</label><select id="cbr-new" class="select-sm" onchange="cbRegionChange('new')"><option value="cn">国内版 · copilot.tencent.com</option><option value="global">国际版 · workbuddy.ai</option></select><span class="form-helper">国内版与国际版是两套互相独立的账号体系，凭据不可混用；切换后上方「API 地址」会自动改成对应域名，授权与转发都按此区域走。</span></div><div class="fg"><label>账号状态</label><button class="btn btn-s" type="button" onclick="codebuddyStatus('new')"><i class="fas fa-coins" aria-hidden="true"></i>查询积分/套餐</button><span class="form-helper">读取该账号的剩余积分与套餐明细（需先在下方 API Keys 填入 refresh_token，或点上方「授权登录」自动获取）。</span></div><div class="mt-1" id="cbst-new" aria-live="polite"></div></div>
             <div class="tts-config" id="tts-new" style="display:none"><fieldset class="form-group"><legend>Azure TTS 音色配置（请求体可临时覆盖）</legend><div class="fr"><div class="fg"><label>音色 Voice</label><div class="tts-voice-row"><select id="av" class="select-sm"><option value="">自定义…</option>${AZURE_VOICE_OPTIONS}</select><button class="btn btn-s" type="button" onclick="previewTts('new')" title="试听当前音色"><i class="fas fa-play" aria-hidden="true"></i>试听</button></div></div><div class="fg"><label>语速 Rate</label><input type="text" id="ar" value="+0%" placeholder="+0%"></div></div><div class="fr"><div class="fg"><label>音量 Volume</label><input type="text" id="avol" value="+0%" placeholder="+0%"></div><div class="fg"><label>音调 Pitch</label><input type="text" id="ap" value="+0Hz" placeholder="+0Hz"></div></div><div class="tts-preview" id="ttp-new"></div><button class="btn btn-s" type="button" onclick="addAllTtsModels('new')"><i class="fas fa-microphone" aria-hidden="true"></i>添加全部音色为模型</button></fieldset></div>
             <fieldset class="form-group"><legend>上游 API Keys</legend><div id="akeys"><div class="fc mb-4 field-row"><input type="text" placeholder="sk-xxx" class="fx1 aki" aria-label="上游 API Key"><label class="tg" title="启用 Key"><input type="checkbox" checked class="ake" aria-label="启用 Key"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)" title="复制 Key" aria-label="复制 Key"><i class="far fa-copy" aria-hidden="true"></i></button><button class="icon-btn" onclick="testNewAKey(this)" title="测试 Key" aria-label="测试 Key"><i class="fas fa-plug" aria-hidden="true"></i></button><button class="icon-btn" onclick="this.parentElement.remove()" title="移除 Key" aria-label="移除 Key"><i class="fas fa-times" aria-hidden="true"></i></button></div></div><div class="fc" style="gap:8px;flex-wrap:wrap"><button class="btn btn-s" onclick="addAKeyRow()"><i class="fas fa-plus" aria-hidden="true"></i>添加 Key</button><button class="btn btn-s" onclick="batchAddKeys()"><i class="fas fa-list" aria-hidden="true"></i>批量添加</button><button class="btn btn-s" onclick="batchTestKeys()"><i class="fas fa-plug" aria-hidden="true"></i>批量测试</button></div></fieldset>
             <aside id="amc" class="hd mdl-list-panel"><div class="panel-heading"><div><span class="panel-heading__mark"><i class="fas fa-cube" aria-hidden="true"></i></span><div><h3>可用模型</h3><p>点击“+”添加到配置。</p></div></div><button class="icon-btn" type="button" onclick="hideMdlPanel('amc')" title="关闭可用模型" aria-label="关闭可用模型"><i class="fas fa-times" aria-hidden="true"></i></button></div><div id="amcl"></div></aside>
@@ -476,7 +486,7 @@ ${H('管理')}
             
               <div class="ag-config" id="ds-${escapePageHtml(p.id)}" ${p.type==='deepseek'?'':'style="display:none"'}><div class="fg"><label>获取 userToken</label><span class="form-helper">两种凭据：① <b>官方 API Key</b>（<code>sk-</code> 开头）→ 直连 api.deepseek.com，免费版可用；② <b>网页 userToken</b>（chat.deepseek.com 的 localStorage.userToken，JWT 约 24h）→ 网页反代，需 Workers Paid（PoW 约 0.3~0.7s CPU）。填入下方 API Keys。</span></div><div class="fg"><label>校验凭据</label><button class="btn btn-s" type="button" onclick="verifyDeepseek('${escapePageHtml(p.id)}')"><i class="fas fa-plug" aria-hidden="true"></i>验证 userToken</button></div></div>
               <div class="ag-config" id="oa-${escapePageHtml(p.id)}" ${['claude','codex','kimi','grok','qwen','codebuddy'].includes(p.type||'')?'':'style="display:none"'}><div class="fg"><label>获取凭据</label><button class="btn btn-s" type="button" onclick="oauthChannel('${escapePageHtml(p.id)}')"><i class="fas fa-key" aria-hidden="true"></i>授权登录获取 refresh_token</button><span class="form-helper">Claude/ChatGPT 跳转官方授权页（回调到 localhost 属正常，复制地址栏 code）；Kimi/Grok 弹出设备码验证页并自动等待授权。refresh_token 会追加到下方 API Keys。</span></div><div class="fg"><label>可用模型</label><button class="btn btn-s" type="button" onclick="fetchOAuthModels('${escapePageHtml(p.id)}')"><i class="fas fa-download" aria-hidden="true"></i>获取模型列表</button></div></div>
-              <div class="cb-config" id="cb-${escapePageHtml(p.id)}" ${p.type==='codebuddy'?'':'style="display:none"'}><div class="fg"><label>账号状态</label><button class="btn btn-s" type="button" onclick="codebuddyStatus('${escapePageHtml(p.id)}')"><i class="fas fa-coins" aria-hidden="true"></i>查询积分/套餐</button><span class="form-helper">读取该账号的剩余积分与套餐明细（取该渠道第一个启用的凭据）。</span></div><div class="mt-1" id="cbst-${escapePageHtml(p.id)}" aria-live="polite"></div></div>
+              <div class="cb-config" id="cb-${escapePageHtml(p.id)}" ${p.type==='codebuddy'?'':'style="display:none"'}><div class="fg"><label for="cbr-${escapePageHtml(p.id)}">版本 / 区域</label><select id="cbr-${escapePageHtml(p.id)}" class="select-sm" onchange="cbRegionChange('${escapePageHtml(p.id)}')"><option value="cn" ${cbRealmOf(p)==='cn'?'selected':''}>国内版 · copilot.tencent.com</option><option value="global" ${cbRealmOf(p)==='global'?'selected':''}>国际版 · workbuddy.ai</option></select><span class="form-helper">国内版与国际版是两套互相独立的账号体系，凭据不可混用；切换后上方「API 地址」会自动改成对应域名。若已有凭据属于另一区域，需重新授权。</span></div><div class="fg"><label>账号状态</label><button class="btn btn-s" type="button" onclick="codebuddyStatus('${escapePageHtml(p.id)}')"><i class="fas fa-coins" aria-hidden="true"></i>查询积分/套餐</button><span class="form-helper">读取该账号的剩余积分与套餐明细（取该渠道第一个启用的凭据）。</span></div><div class="mt-1" id="cbst-${escapePageHtml(p.id)}" aria-live="polite"></div></div>
               <div class="tts-config" id="tts-${escapePageHtml(p.id)}" ${(p.type||'openai')==='azure-tts'?'':'style="display:none"'}><fieldset class="form-group"><legend>Azure TTS 音色配置（请求体可临时覆盖）</legend><div class="fr"><div class="fg"><label>音色 Voice</label><div class="tts-voice-row"><select id="pv-${escapePageHtml(p.id)}" class="select-sm"><option value="">自定义…</option>${azureVoiceOptions(p.voice||'zh-CN-XiaoxiaoNeural')}</select><button class="btn btn-s" type="button" onclick="previewTts('${escapePageHtml(p.id)}')" title="试听当前音色"><i class="fas fa-play" aria-hidden="true"></i>试听</button></div></div><div class="fg"><label>语速 Rate</label><input type="text" id="pr-${escapePageHtml(p.id)}" value="${escapePageHtml(p.rate||'+0%')}" placeholder="+0%"></div></div><div class="fr"><div class="fg"><label>音量 Volume</label><input type="text" id="pvol-${escapePageHtml(p.id)}" value="${escapePageHtml(p.volume||'+0%')}" placeholder="+0%"></div><div class="fg"><label>音调 Pitch</label><input type="text" id="pp-${escapePageHtml(p.id)}" value="${escapePageHtml(p.pitch||'+0Hz')}" placeholder="+0Hz"></div></div><div class="tts-preview" id="ttp-${escapePageHtml(p.id)}"></div><div class="fc" style="gap:8px;flex-wrap:wrap"><button class="btn btn-s" type="button" onclick="addTtsModel('${escapePageHtml(p.id)}')" title="把当前选中的音色添加到模型列表"><i class="fas fa-plus" aria-hidden="true"></i>添加模型</button><button class="btn btn-s" type="button" onclick="addAllTtsModels('${escapePageHtml(p.id)}')"><i class="fas fa-microphone" aria-hidden="true"></i>添加全部音色为模型</button></div></fieldset></div>
               <div class="fg" data-hide-ag ${p.type==='antigravity'?'style="display:none"':''}><label>镜像地址</label><textarea id="mir-${escapePageHtml(p.id)}" rows="3" placeholder="每行一个, 留空使用 OPENCODE_MIRRORS_URL 环境变量">${(p.mirrorUrls||[]).map(escapePageHtml).join('\n')}</textarea><span class="form-helper">官方地址失败后自动故障转移到的镜像地址，每行一个 URL。</span></div>
               <fieldset class="form-group"><legend>上游 API Keys</legend><div id="keys-${escapePageHtml(p.id)}">${p.apiKeys.map((k, ki)=>`<div class="fc mb-3 field-row" data-kidx="${ki}"><input type="text" value="${escapePageHtml(k.key)}" class="fx1" id="k-${escapePageHtml(p.id)}-${ki}" placeholder="API Key" aria-label="API Key"><label class="tg"><input type="checkbox" ${k.enabled?'checked':''} id="ken-${escapePageHtml(p.id)}-${ki}" aria-label="启用 Key"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)" title="复制 Key" aria-label="复制 Key"><i class="far fa-copy" aria-hidden="true"></i></button><button class="icon-btn" onclick="testKeyRow('${p.id}',${ki})" title="测试 Key" aria-label="测试 Key"><i class="fas fa-plug" aria-hidden="true"></i></button><button class="icon-btn" onclick="rmKeyRow('${p.id}',${ki})" title="移除 Key" aria-label="移除 Key"><i class="fas fa-times" aria-hidden="true"></i></button></div>`).join('')}</div><div class="fc mt-1 field-row"><input type="text" id="nk-${escapePageHtml(p.id)}" placeholder="新的 API Key" class="fx1"><button class="btn btn-s" onclick="addKeyRow('${p.id}')"><i class="fas fa-plus" aria-hidden="true"></i>添加</button></div></fieldset>
@@ -652,6 +662,22 @@ function isDeepseekType(t) { return t === 'deepseek' }
 function isZaiType(t) { return t === 'zai' }
 function isCodebuddyType(t) { return t === 'codebuddy' }
 
+// ===== CodeBuddy 区域（国内版 / 国际版）=====
+// 区域以 region 字段为准，API 地址仅作展示与兜底；两套账号体系互相独立，凭据不可混用。
+const CB_REGION_URLS = { cn: 'https://copilot.tencent.com', global: 'https://www.workbuddy.ai' }
+function cbRegionValue(id) {
+  const el = document.getElementById('cbr-' + id)
+  return el && el.value === 'global' ? 'global' : 'cn'
+}
+function cbRegionUrl(id) { return CB_REGION_URLS[cbRegionValue(id)] }
+// 切换区域：同步 API 地址，并清掉上一次的区域相关查询结果（换区后旧结果已失效）
+function cbRegionChange(id) {
+  const urlEl = document.getElementById(id === 'new' ? 'aurl' : 'url-' + id)
+  if (urlEl) urlEl.value = cbRegionUrl(id)
+  const box = document.getElementById(id === 'new' ? 'cbst-new' : 'cbst-' + id)
+  if (box) box.innerHTML = ''
+}
+
 // 渠道类型切换: azure-tts 显示音色配置, antigravity/OAuth 反代显示授权区; 这些类型都忽略 API 地址
 function onTypeChange(sel, id) {
   const isTts = sel.value === 'azure-tts'
@@ -687,7 +713,7 @@ function onTypeChange(sel, id) {
       : sel.value === 'grok' ? 'Grok (xAI) 反代: 设备码授权获取 refresh_token, 请求自动翻译成 Responses 协议。'
       : sel.value === 'qwen' ? 'Qwen 反代: 设备码授权获取 refresh_token, OpenAI 兼容直通 (portal.qwen.ai)。'
       : sel.value === 'deepseek' ? 'DeepSeek 反代: 填官方 API Key(sk-, 直连 api.deepseek.com) 或网页 userToken(PoW, 需 Workers Paid)。'
-      : sel.value === 'codebuddy' ? 'CodeBuddy(腾讯) 反代: 点「授权登录」用腾讯账号扫码/登录获取 refresh_token。上游强制流式, 非流式请求由网关自动聚合; API 地址决定区域(含 workbuddy.ai 走国际版)。'
+      : sel.value === 'codebuddy' ? 'CodeBuddy(腾讯) 反代: 先在下方「版本 / 区域」选国内版或国际版, 再点「授权登录」登录对应区域的账号获取 refresh_token。上游强制流式, 非流式请求由网关自动聚合。'
       : sel.value === 'zai' ? 'Z.AI 预设: 填 z.ai 的 API Key(编码套餐)。/v1/messages 自动走 Anthropic 端点, 其余走 OpenAI 端点。'
       : 'Agnes 等聚合平台建议选 OpenAI 兼容, 视频模型自动走异步适配。'
   }
@@ -700,11 +726,11 @@ function onTypeChange(sel, id) {
   if (id === 'new') {
     const url = document.getElementById('aurl')
     if (url) {
-      // codebuddy 的 API 地址用于切换区域(国内版/国际版)，保持可编辑
+      // codebuddy 的 API 地址跟随「版本/区域」下拉，保持可编辑
       url.disabled = isTts || isAg || (isOa && !isCb) || isDs
       if (isTts) url.value = ''
       else if (isAg) url.value = 'https://daily-cloudcode-pa.googleapis.com'
-      else if (isCb) { if (!url.value) url.value = OAUTH_DEFAULT_URLS.codebuddy }
+      else if (isCb) url.value = cbRegionUrl('new')
       else if (isOa || isDs) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
       else if (isZai) url.value = OAUTH_DEFAULT_URLS.zai
       else if (!url.value) url.value = 'https://'
@@ -714,7 +740,7 @@ function onTypeChange(sel, id) {
     if (url) {
       url.disabled = isTts || isAg || (isOa && !isCb) || isDs
       if (isAg && !url.value) url.value = 'https://daily-cloudcode-pa.googleapis.com'
-      if (isCb && !url.value) url.value = OAUTH_DEFAULT_URLS.codebuddy
+      if (isCb && !url.value) url.value = cbRegionUrl(id)
       if ((isOa && !isCb || isDs) && !url.value) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
       if (isZai && !url.value) url.value = OAUTH_DEFAULT_URLS.zai
       if (isTts && !url.dataset.orig) url.dataset.orig = url.value
@@ -894,7 +920,7 @@ async function oauthChannel(id) {
   try {
     const baseEl = document.getElementById(id === 'new' ? 'aurl' : 'url-' + id)
     const baseUrl = baseEl ? baseEl.value.trim() : ''
-    const r = await fetch('/admin/api/oauth/' + provider + '/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseUrl: baseUrl }) })
+    const r = await fetch('/admin/api/oauth/' + provider + '/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseUrl: baseUrl, region: cbRegionValue(id) }) })
     const d = await r.json()
     if (!d.success || !d.data) { if (tr) showResult(tr, false, d.message || '发起授权失败'); return }
     if (d.data.mode === 'redirect') {
@@ -1008,7 +1034,7 @@ async function codebuddyStatus(id) {
     const baseUrl = baseEl ? baseEl.value.trim() : ''
     const r = await fetch('/admin/api/codebuddy/status', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: key, baseUrl: baseUrl }),
+      body: JSON.stringify({ refreshToken: key, baseUrl: baseUrl, region: cbRegionValue(id) }),
     })
     const d = await r.json()
     if (tr) showResult(tr, !!(d.success && d.data && d.data.ok), (d.success && d.data && d.data.ok) ? '' : (d.message || (d.data && d.data.message) || '查询失败'))
@@ -1083,7 +1109,7 @@ async function fetchOAuthModels(id) {
   try {
     const baseEl2 = document.getElementById(id === 'new' ? 'aurl' : 'url-' + id)
     const netBase = baseEl2 ? baseEl2.value.trim() : ''
-    const r = await fetch('/admin/api/oauth/' + provider + '/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: key, baseUrl: netBase }) })
+    const r = await fetch('/admin/api/oauth/' + provider + '/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: key, baseUrl: netBase, region: cbRegionValue(id) }) })
     const d = await r.json()
     if (!d.success || !d.data || !d.data.models || d.data.models.length === 0) {
       if (tr) showResult(tr, false, (d.data && d.data.message) || d.message || '未获取到模型，请手动填写')
@@ -1507,7 +1533,7 @@ async function createProv() {
   const r = await fetch('/admin/api/providers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, name: nm, baseUrl: url, apiType, type, apiKeys: keys, models, mirrorUrls, enabled, project: provProject('new') || undefined, location: provVertexLocation('new') || undefined, ...ttsConf })
+    body: JSON.stringify({ id, name: nm, baseUrl: url, apiType, type, region: isCodebuddyType(type) ? cbRegionValue('new') : undefined, apiKeys: keys, models, mirrorUrls, enabled, project: provProject('new') || undefined, location: provVertexLocation('new') || undefined, ...ttsConf })
   })
   const d = await r.json()
   if (d.success) { toast('已创建', 'success'); location.reload() }
@@ -1647,7 +1673,7 @@ async function save(id) {
   const r = await fetch('/admin/api/providers/' + encodeURIComponent(id), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: nm, baseUrl: url, apiType, type, apiKeys: keys, models, mirrorUrls, enabled, newId, project: provProject(id) || undefined, location: provVertexLocation(id) || undefined, ...ttsConf })
+    body: JSON.stringify({ name: nm, baseUrl: url, apiType, type, region: isCodebuddyType(type) ? cbRegionValue(id) : undefined, apiKeys: keys, models, mirrorUrls, enabled, newId, project: provProject(id) || undefined, location: provVertexLocation(id) || undefined, ...ttsConf })
   })
   const d = await r.json()
   if (d.success) { toast('已保存', 'success'); location.reload() }

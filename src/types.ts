@@ -21,9 +21,15 @@ export interface Provider {
    *          | deepseek (官方 API Key / 网页 userToken 反代) | zai (Z.AI 预设, 缺省 openai)
    *
    * codebuddy: 腾讯 CodeBuddy/WorkBuddy 账号反代（凭据为 refresh_token，上游 /v2/chat/completions
-   *            强制 stream，非流式由网关本地聚合）。baseUrl 含 workbuddy.ai 走国际版，否则国内版。
+   *            强制 stream，非流式由网关本地聚合）。区域由 region 字段显式指定，
+   *            留空时回退按 baseUrl 是否含 workbuddy.ai 判定。
    */
   type?: string
+  /**
+   * CodeBuddy 区域(仅 type=codebuddy 使用)：cn = 国内版(copilot.tencent.com / codebuddy.cn)，
+   * global = 国际版(workbuddy.ai)。两套账号体系完全独立，凭据不可混用。
+   */
+  region?: 'cn' | 'global'
   apiKeys: ApiKeyEntry[]
   models: Model[]
   enabled: boolean
@@ -116,6 +122,8 @@ export interface CreateProviderRequest {
   baseUrl: string
   apiType?: 'openai' | 'anthropic'
   type?: string
+  /** CodeBuddy 区域(仅 type=codebuddy 使用)：cn 国内版 / global 国际版 */
+  region?: 'cn' | 'global'
   apiKeys?: Array<{ key: string; enabled: boolean }>
   models?: Array<{ id: string; enabled: boolean }> | string[]
   mirrorUrls?: string[] | string
@@ -133,6 +141,8 @@ export interface UpdateProviderRequest {
   baseUrl?: string
   apiType?: 'openai' | 'anthropic'
   type?: string
+  /** CodeBuddy 区域(仅 type=codebuddy 使用)：cn 国内版 / global 国际版 */
+  region?: 'cn' | 'global'
   apiKeys?: Array<{ key: string; enabled: boolean }>
   models?: Array<{ id: string; enabled: boolean }> | string[]
   mirrorUrls?: string[] | string

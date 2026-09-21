@@ -207,7 +207,7 @@ OAuth refresh_token，网关自动换取/缓存 access_token（KV 缓存、支�
 | `codex` | Codex CLI OAuth（PKCE，授权链接） | `chatgpt.com/backend-api/codex/responses` | OpenAI Responses 协议，自动带 `Chatgpt-Account-Id`；原生 `/v1/responses` 透传 |
 | `kimi` | Kimi 设备码（RFC 8628，**国际站优先**） | `api.kimi.ai/coding/v1/chat/completions` | OpenAI 兼容直通，模型名自动归一化（如 `kimi-k2.8` → `kimi-for-coding`） |
 | `grok` | xAI Grok CLI 设备码（OIDC 发现） | `cli-chat-proxy.grok.com/v1/responses` | OpenAI Responses 协议，带 Grok CLI 身份头；原生 `/v1/responses` 透传 |
-| `codebuddy` | CodeBuddy 设备流（服务端签发 state，打开链接登录后轮询） | `copilot.tencent.com/v2/chat/completions` | 腾讯 CodeBuddy / WorkBuddy 账号；上游强制流式，非流式请求由网关本地聚合 |
+| `codebuddy` | CodeBuddy 设备流（服务端签发 state，打开链接登录后轮询） | 国内版 `copilot.tencent.com/v2/chat/completions`；国际版 `www.workbuddy.ai/v2/chat/completions` | 腾讯 CodeBuddy / WorkBuddy 账号，后台可切换**国内版 / 国际版**（两套独立账号体系）；上游强制流式，非流式请求由网关本地聚合 |
 
 ### 配置步骤
 
@@ -226,6 +226,7 @@ OAuth refresh_token，网关自动换取/缓存 access_token（KV 缓存、支�
 ## CodeBuddy 反代（`codebuddy` 渠道，腾讯）
 
 移植自 [Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api) 的上游协议实现（MIT），
+并参考 [linbeize/workbuddy2api-gui](https://github.com/linbeize/workbuddy2api-gui) 补齐了国内版/国际版的双域细节。
 把 **CodeBuddy / WorkBuddy 账号**变成 OpenAI 兼容渠道。上游本身是 OpenAI 兼容协议，
 但有若干硬性要求，网关已全部代为处理：
 
@@ -240,18 +241,35 @@ OAuth refresh_token，网关自动换取/缓存 access_token（KV 缓存、支�
 | DeepSeek 系需显式开思考 | 自动注入 `thinking.type=enabled` + 默认档位，并回填 `reasoning_content` |
 | 桌面端指纹风控 | 出站伪装官方客户端头组（`X-CodeBuddy-Request`、按 uid 派生的 `X-Machine-ID`/`X-Session-ID`、会话头族等） |
 
-**双域**：渠道「API 地址」决定区域 —— 留空或 `https://copilot.tencent.com` 走**国内版**
-（Origin 为 `www.codebuddy.cn`）；填 `https://www.workbuddy.ai` 走**国际版**（平台段 UA 切换为 `WorkBuddy AI`）。
+### 国内版 / 国际版（两套独立账号体系）
+
+CodeBuddy 与 WorkBuddy 是**两套互相独立的账号体系**，凭据不可混用。渠道配置里有一个
+**「版本 / 区域」**下拉，选定后「API 地址」会自动同步为对应域名，授权、转发、积分查询全部按该区域走。
+
+| 区域 | 对话 / 授权域名 | 积分·套餐域名 | Origin / Referer | 出站 UA 平台段 |
+|------|----------------|--------------|------------------|---------------|
+| `cn` 国内版 | `copilot.tencent.com` | `www.codebuddy.cn` | `www.codebuddy.cn` | `WorkBuddy` |
+| `global` 国际版 | `www.workbuddy.ai` | `www.workbuddy.ai` | `www.workbuddy.ai` | `WorkBuddy AI` |
+
+区域以渠道的 `region` 字段为准（`cn` / `global`）。**向后兼容**：未设置该字段的老渠道，
+仍按「API 地址是否含 `workbuddy.ai`」判定，留空视为国内版。
+
+> 积分查询端点会按区域依次尝试候选地址（国内版优先 `www.codebuddy.cn`，
+> 国际版优先无 `/v2` 前缀形态），任一 404 自动回退到下一个，避免上游路径调整直接失效。
+> 国际版上游**经常不返回 `authUrl`**，此时网关按区域兜底拼出登录页，不会让整个授权流程失败。
 
 ### 配置步骤
 
-1. 后台「添加渠道」→ 渠道类型选 **CodeBuddy (腾讯) 反代** → 点 **「授权登录获取 refresh_token」**：
-   弹出窗口会打开腾讯登录页，**用你的 CodeBuddy / WorkBuddy 账号完成登录即可，无需复制任何 code** ——
-   登录完成后弹窗会自动轮询并把 refresh_token 填入 API Keys。
-2. 点 **「获取模型列表」** 自动拉取可用模型（如 `deepseek-v4.1-flash`）；也可手动填写。
-3. 点 **「查询积分/套餐」** 可查看该账号的剩余积分与套餐明细。
-4. **多账号**：API Keys 每行一个 refresh_token，网关按「健康度 + 随机」轮换，
+1. 后台「添加渠道」→ 渠道类型选 **CodeBuddy (腾讯) 反代** → 在 **「版本 / 区域」** 选国内版或国际版。
+2. 点 **「授权登录获取 refresh_token」**：弹出窗口会打开**所选区域**的登录页，
+   **用对应区域的账号完成登录即可，无需复制任何 code** —— 登录完成后弹窗会自动轮询并把 refresh_token 填入 API Keys。
+3. 点 **「获取模型列表」** 自动拉取可用模型（如 `deepseek-v4.1-flash`）；也可手动填写。
+4. 点 **「查询积分/套餐」** 可查看该账号的剩余积分与套餐明细。
+5. **多账号**：API Keys 每行一个 refresh_token，网关按「健康度 + 随机」轮换，
    遇 401/403/429/5xx 自动换号。
+
+> ⚠️ 一个渠道只能对应一个区域。若要在国内版和国际版各配账号，请**分别建两个渠道**。
+> 切换已有渠道的区域后，原凭据会因属于另一套体系而失效，需重新授权。
 
 > ⚠️ 合规提示：该渠道使用 CodeBuddy 账号作为上游，仅限**本人授权账号**在私有环境使用，
 > 请遵守目标平台服务条款。另注意上游有**定时任务类**能力（每日签到、积分领取、token 保活等）

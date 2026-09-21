@@ -14,9 +14,10 @@
  *    非流式请求由网关本地聚合为单条响应。
  * 4. 出站 body 必须改写（见 rewriteCodebuddyPayload），出站头必须伪装官方桌面端（见 cbChatHeaders）。
  *
- * 双域：CN → copilot.tencent.com（Origin/Referer = www.codebuddy.cn）
- *       Global → www.workbuddy.ai（Origin/Referer = www.workbuddy.ai）
- * 按渠道 baseUrl 判定：含 workbuddy.ai 走 Global，其余（含留空）走 CN。
+ * 双域：CN     → chat copilot.tencent.com / billing www.codebuddy.cn（Origin/Referer = www.codebuddy.cn）
+ *       Global → chat & billing 均为 www.workbuddy.ai（Origin/Referer = www.workbuddy.ai）
+ * 区域由渠道 region 字段（cn | global）显式指定；留空时回退按 baseUrl 是否含 workbuddy.ai 判定。
+ * 两套账号体系完全独立，凭据不可混用。
  *
  * 渠道 apiKeys 里每行一个 refresh_token（可点后台「授权登录」自动获取）。
  */
@@ -39,14 +40,31 @@ import {
 // 上游常量
 // =====================================================================
 
+/** 区域标识，与渠道 Provider.region 字段同值 */
+export type CbRealm = 'cn' | 'global'
+
 interface CbRegion {
+  /** 对话 / 授权 / 模型目录端点基址 */
   base: string
+  /** 积分·套餐（billing）端点基址 —— CN 与 chat 不同域，不能混用 */
+  billingBase: string
+  /** Origin / Referer，同时也作为账号 domain 的兜底值来源 */
   origin: string
   global: boolean
 }
 
-const CB_CN: CbRegion = { base: 'https://copilot.tencent.com', origin: 'https://www.codebuddy.cn', global: false }
-const CB_GLOBAL: CbRegion = { base: 'https://www.workbuddy.ai', origin: 'https://www.workbuddy.ai', global: true }
+const CB_CN: CbRegion = {
+  base: 'https://copilot.tencent.com',
+  billingBase: 'https://www.codebuddy.cn',
+  origin: 'https://www.codebuddy.cn',
+  global: false,
+}
+const CB_GLOBAL: CbRegion = {
+  base: 'https://www.workbuddy.ai',
+  billingBase: 'https://www.workbuddy.ai',
+  origin: 'https://www.workbuddy.ai',
+  global: true,
+}
 
 /** 官方桌面端客户端版本（UA 的 WorkBuddy/<ver> 段与 X-IDE-Version） */
 const CB_CLIENT_VERSION = '5.5.4'
@@ -65,9 +83,23 @@ const CB_MODELS_PATH_CN = '/console/enterprises/personal/models'
 const CB_MODELS_PATH_GLOBAL = '/v2/enterprises/personal/models'
 /** 双域通用的模型目录端点（fallback） */
 const CB_V3_CONFIG_PATH = '/v3/config'
-/** 积分/套餐余额端点：Global 无 /v2 前缀，404 时回退带前缀 */
-const CB_METER_PATHS_GLOBAL = ['/billing/meter/get-user-resource', '/v2/billing/meter/get-user-resource']
-const CB_METER_PATHS_CN = ['/v2/billing/meter/get-user-resource']
+/**
+ * 积分/套餐余额端点候选，按序尝试（404 或非业务成功则换下一个）。
+ * CN：billing 走独立域 www.codebuddy.cn，再兜底回 chat 域；
+ * Global：以无 /v2 前缀为主，404 时回退带前缀形态。
+ */
+interface CbMeterTarget {
+  base: string
+  path: string
+}
+const CB_METER_CANDIDATES_CN: CbMeterTarget[] = [
+  { base: 'https://www.codebuddy.cn', path: '/v2/billing/meter/get-user-resource' },
+  { base: 'https://copilot.tencent.com', path: '/v2/billing/meter/get-user-resource' },
+]
+const CB_METER_CANDIDATES_GLOBAL: CbMeterTarget[] = [
+  { base: 'https://www.workbuddy.ai', path: '/billing/meter/get-user-resource' },
+  { base: 'https://www.workbuddy.ai', path: '/v2/billing/meter/get-user-resource' },
+]
 
 /** KV key 前缀 */
 const CB_AT_PREFIX = 'codebuddy:at:'
@@ -79,9 +111,19 @@ const CB_AUTH_TTL = 3600
 /** 账号信息缓存有效期（秒） */
 const CB_ACCT_TTL = 90 * 24 * 3600
 
-/** 按渠道 baseUrl 判定区域。留空或非 workbuddy.ai 一律走 CN（与上游一致）。 */
-export function cbRegion(baseUrl?: string): CbRegion {
+/**
+ * 解析渠道区域。显式 region 优先（'global' | 'cn'）；
+ * 留空时回退按 baseUrl 判定：含 workbuddy.ai 走 Global，其余（含留空）走 CN（与上游一致）。
+ */
+export function cbRegion(baseUrl?: string, region?: string): CbRegion {
+  if (region === 'global') return CB_GLOBAL
+  if (region === 'cn') return CB_CN
   return /workbuddy\.ai/i.test(baseUrl || '') ? CB_GLOBAL : CB_CN
+}
+
+/** 区域 → 该区域账号 domain 的兜底值（上游不回 domain 时写入，保证跨会话判定稳定） */
+function cbFallbackDomain(region: CbRegion): string {
+  return region.global ? 'www.workbuddy.ai' : 'copilot.tencent.com'
 }
 
 /** 官方桌面端出站 UA：`WorkBuddy/<cv> <platform>/<cv> CLI/<cli>`（global 平台段为 `WorkBuddy AI`） */
@@ -145,15 +187,15 @@ async function getCbAccount(env: Env, refreshToken: string): Promise<CbAccount> 
 export interface CbDeviceFlow {
   state: string
   authUrl: string
-  realm: 'cn' | 'global'
+  realm: CbRealm
 }
 
 /** 发起授权：取授权链接并把 state 落 KV（轮询时据此还原域与 base） */
-export async function startCodebuddyDeviceFlow(env: Env, baseUrl?: string): Promise<CbDeviceFlow> {
-  const region = cbRegion(baseUrl)
-  const res = await fetch(region.base + CB_STATE_PATH, {
+export async function startCodebuddyDeviceFlow(env: Env, baseUrl?: string, region?: string): Promise<CbDeviceFlow> {
+  const reg = cbRegion(baseUrl, region)
+  const res = await fetch(reg.base + CB_STATE_PATH, {
     method: 'POST',
-    headers: cbLoginHeaders(region.origin),
+    headers: cbLoginHeaders(reg.origin),
     body: '{}',
     signal: AbortSignal.timeout(30000),
   })
@@ -165,15 +207,17 @@ export async function startCodebuddyDeviceFlow(env: Env, baseUrl?: string): Prom
     throw new Error(`授权发起返回非 JSON (HTTP ${res.status}): ${text.slice(0, 200)}`)
   }
   const state = String(json?.data?.state || '')
-  const authUrl = String(json?.data?.authUrl || '')
-  if (json?.code !== 0 || !state || !authUrl) {
+  // 上游偶发不返回 authUrl（国际版更常见），此时按 base 兜底拼一个登录页，避免整个授权流程直接失败
+  let authUrl = String(json?.data?.authUrl || '')
+  if (json?.code !== 0 || !state) {
     throw new Error(`授权发起失败 code=${json?.code} msg=${json?.msg || text.slice(0, 200)}`)
   }
-  const realm: 'cn' | 'global' = region.global ? 'global' : 'cn'
+  if (!authUrl) authUrl = `${reg.base}/login?state=${encodeURIComponent(state)}&platform=CLI`
+  const realm: CbRealm = reg.global ? 'global' : 'cn'
   try {
     await getKV(env).put(
       CB_AUTH_PREFIX + state,
-      JSON.stringify({ realm, base: region.base, origin: region.origin }),
+      JSON.stringify({ realm, base: reg.base, origin: reg.origin, fallbackDomain: cbFallbackDomain(reg) }),
       { expirationTtl: CB_AUTH_TTL },
     )
   } catch (e) {
@@ -199,7 +243,7 @@ export interface CbPollResult {
 export async function pollCodebuddyDeviceFlow(env: Env, state: string): Promise<CbPollResult> {
   const raw = await getKV(env).get(CB_AUTH_PREFIX + state).catch(() => null)
   if (!raw) return { status: 'error', message: '授权会话不存在或已过期，请重新发起授权' }
-  let sess: { realm: string; base: string; origin: string; done?: boolean; refreshToken?: string; account?: CbAccount }
+  let sess: { realm: string; base: string; origin: string; fallbackDomain?: string; done?: boolean; refreshToken?: string; account?: CbAccount }
   try {
     sess = JSON.parse(raw)
   } catch {
@@ -235,6 +279,8 @@ export async function pollCodebuddyDeviceFlow(env: Env, state: string): Promise<
 
   // 账号信息（尽力而为，失败不影响授权）
   const account: CbAccount = { domain: String(data.domain || '') }
+  // 上游（尤其国际版）常不回 domain：按发起授权时记录的区域兜底，保证后续区域判定与 billing 头稳定
+  if (!account.domain) account.domain = sess.fallbackDomain || ''
   try {
     const ar = await fetch(`${sess.base}${CB_ACCOUNT_PATH}?state=${encodeURIComponent(state)}`, {
       headers: { ...cbLoginHeaders(sess.origin), Authorization: 'Bearer ' + accessToken },
@@ -978,7 +1024,8 @@ function normalizeCodebuddyStream(src: ReadableStream<Uint8Array>): {
 // 对外入口：chat 反代
 // =====================================================================
 
-export async function handleCodebuddyRequest(p: OAuthCallParams, baseUrl?: string): Promise<Response> {
+/** regionCode: 渠道配置的区域（'cn' | 'global'）；留空则回退按 baseUrl 判定 */
+export async function handleCodebuddyRequest(p: OAuthCallParams, baseUrl?: string, regionCode?: string): Promise<Response> {
   const tokens = (p.refreshTokens || []).filter((t) => t && t.trim())
   if (tokens.length === 0) {
     return oauthErrorResponse(
@@ -988,7 +1035,7 @@ export async function handleCodebuddyRequest(p: OAuthCallParams, baseUrl?: strin
     )
   }
 
-  const region = cbRegion(baseUrl)
+  const region = cbRegion(baseUrl, regionCode)
   const wantStream = (p.body as any)?.stream === true
   const upstreamBody = rewriteCodebuddyPayload(p.body, p.modelId)
 
@@ -1057,9 +1104,10 @@ export async function testCodebuddy(
   refreshToken: string,
   modelId: string,
   baseUrl?: string,
+  regionCode?: string,
 ): Promise<{ success: boolean; message: string; statusCode?: number }> {
   if (!refreshToken) return { success: false, message: '未填写 refresh_token', statusCode: 0 }
-  const region = cbRegion(baseUrl)
+  const region = cbRegion(baseUrl, regionCode)
   try {
     const { accessToken, account } = await getCbAccess(env, refreshToken, region)
     const headers = await cbChatHeaders(region, accessToken, account, true)
@@ -1085,8 +1133,9 @@ export async function fetchCodebuddyModels(
   env: Env,
   refreshToken: string,
   baseUrl?: string,
+  regionCode?: string,
 ): Promise<{ success: boolean; models: string[]; message?: string }> {
-  const region = cbRegion(baseUrl)
+  const region = cbRegion(baseUrl, regionCode)
   try {
     const { accessToken, account } = await getCbAccess(env, refreshToken, region)
     const headers = await cbChatHeaders(region, accessToken, account, false)
@@ -1201,9 +1250,9 @@ function packageRemainUsed(a: {
 }
 
 /** 查询账号积分/套餐余额（后台展示用）。 */
-export async function fetchCodebuddyStatus(env: Env, refreshToken: string, baseUrl?: string): Promise<CbAccountStatus> {
+export async function fetchCodebuddyStatus(env: Env, refreshToken: string, baseUrl?: string, regionCode?: string): Promise<CbAccountStatus> {
   if (!refreshToken) return { ok: false, message: '未填写 refresh_token' }
-  const region = cbRegion(baseUrl)
+  const region = cbRegion(baseUrl, regionCode)
   try {
     const { accessToken, account } = await getCbAccess(env, refreshToken, region)
     const headers = cbBillingHeaders(region, accessToken, account)
@@ -1221,10 +1270,10 @@ export async function fetchCodebuddyStatus(env: Env, refreshToken: string, baseU
       PackageEndTimeRangeEnd: fmt(new Date(now.getTime() + 365 * 101 * 24 * 3600 * 1000)),
     }
 
-    const paths = region.global ? CB_METER_PATHS_GLOBAL : CB_METER_PATHS_CN
+    const targets = region.global ? CB_METER_CANDIDATES_GLOBAL : CB_METER_CANDIDATES_CN
     let lastMsg = ''
-    for (const path of paths) {
-      const res = await fetch(region.base + path, {
+    for (const target of targets) {
+      const res = await fetch(target.base + target.path, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
@@ -1233,7 +1282,7 @@ export async function fetchCodebuddyStatus(env: Env, refreshToken: string, baseU
       const text = await res.text()
       if (res.status === 404) {
         lastMsg = `HTTP 404: ${text.slice(0, 120)}`
-        continue // Global 无 /v2 前缀，404 时回退
+        continue // 该域/前缀不存在：CN 的 billing 独立域、Global 的 /v2 前缀差异，换下一个候选
       }
       let json: any
       try { json = JSON.parse(text) } catch {

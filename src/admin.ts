@@ -76,6 +76,14 @@ function normalizeMirrorUrls(value: unknown): string[] | undefined {
   return cleaned.length > 0 ? cleaned : undefined
 }
 
+/**
+ * 归一化渠道区域（仅 codebuddy 使用）：只接受 'cn' | 'global'，
+ * 其它值（含空串/null）一律返回 undefined —— 表示「未指定」，由 baseUrl 回退判定。
+ */
+function normalizeRegion(value: unknown): 'cn' | 'global' | undefined {
+  return value === 'cn' || value === 'global' ? value : undefined
+}
+
 /** 从模型真实 id 生成对外 alias：去掉 :free、/free 或 -free 后缀 */
 export function defaultModelAlias(id: string): string {
   return id
@@ -164,6 +172,7 @@ apiKeys: normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true })),
     mirrorUrls: normalizeMirrorUrls(body.mirrorUrls),
     project: body.project,
     location: body.location,
+    region: normalizeRegion(body.region),
     voice: body.voice,
     rate: body.rate,
     volume: body.volume,
@@ -194,6 +203,7 @@ export async function handleUpdateProvider(c: Context<{ Bindings: Env }>) {
   if (body.mirrorUrls !== undefined) updates.mirrorUrls = normalizeMirrorUrls(body.mirrorUrls)
   if (body.project !== undefined) updates.project = body.project
   if (body.location !== undefined) updates.location = body.location
+  if (body.region !== undefined) updates.region = normalizeRegion(body.region)
 if (body.apiKeys !== undefined) {
     updates.apiKeys = normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true }))
   }
@@ -262,7 +272,7 @@ export async function handleTestModel(c: Context<{ Bindings: Env }>) {
     : ptype === 'antigravity'
       ? await testAntigravityRotating(c.env, enabledKeys.map(k => k.key), modelId, provider.project)
       : ['claude', 'codex', 'kimi', 'grok', 'qwen', 'deepseek', 'codebuddy'].includes(ptype)
-        ? await testOAuthProviderRotating(c.env, ptype, enabledKeys.map(k => k.key), modelId, provider.baseUrl, provider.id)
+        ? await testOAuthProviderRotating(c.env, ptype, enabledKeys.map(k => k.key), modelId, provider.baseUrl, provider.id, provider.region)
         : await testModelConnectionRotating(provider.baseUrl, enabledKeys.map(k => k.key), modelId, provider.apiType)
 
   return c.json<ApiResponse>({
@@ -600,7 +610,7 @@ interface OAuthPollResult {
 /** 发起授权：claude/codex 返回授权链接；kimi/grok/qwen 返回设备码信息 */
 export async function handleOAuthStart(c: Context<{ Bindings: Env }>) {
   const provider = c.req.param('provider') || ''
-  const body = await c.req.json<{ baseUrl?: string }>().catch(() => ({} as { baseUrl?: string }))
+  const body = await c.req.json<{ baseUrl?: string; region?: string }>().catch(() => ({} as { baseUrl?: string; region?: string }))
   if (!OAUTH_PROVIDERS.has(provider)) {
     return c.json<ApiResponse>({ success: false, message: `不支持的 OAuth 渠道类型: ${provider}` }, 400)
   }
@@ -615,7 +625,7 @@ export async function handleOAuthStart(c: Context<{ Bindings: Env }>) {
     }
     if (provider === 'codebuddy') {
       // 设备流：上游签发 state + 授权链接，浏览器登录后由 poll 轮询换 token
-      const flow = await startCodebuddyDeviceFlow(c.env, body.baseUrl)
+      const flow = await startCodebuddyDeviceFlow(c.env, body.baseUrl, body.region)
       return c.json<ApiResponse<{ mode: 'redirect-poll'; url: string; state: string; realm: string }>>({
         success: true,
         data: { mode: 'redirect-poll', url: flow.authUrl, state: flow.state, realm: flow.realm },
@@ -685,7 +695,7 @@ export async function handleOAuthPoll(c: Context<{ Bindings: Env }>) {
 /** 拉取可用模型（claude / kimi，凭据为 refresh_token） */
 export async function handleOAuthModels(c: Context<{ Bindings: Env }>) {
   const provider = c.req.param('provider') || ''
-  const { apiKey, baseUrl } = await c.req.json<{ apiKey?: string; baseUrl?: string }>()
+  const { apiKey, baseUrl, region } = await c.req.json<{ apiKey?: string; baseUrl?: string; region?: string }>()
   if (!apiKey) {
     return c.json<ApiResponse>({ success: false, message: '请先填写 refresh_token' }, 400)
   }
@@ -707,7 +717,7 @@ export async function handleOAuthModels(c: Context<{ Bindings: Env }>) {
     return c.json<ApiResponse<{ models: string[] }>>({ success: true, data: { models: r.models } })
   }
   if (provider === 'codebuddy') {
-    const r = await fetchCodebuddyModels(c.env, apiKey, baseUrl)
+    const r = await fetchCodebuddyModels(c.env, apiKey, baseUrl, region)
     return c.json<ApiResponse<{ models: string[]; message?: string }>>({ success: r.success, data: { models: r.models, message: r.message }, message: r.message })
   }
   return c.json<ApiResponse>({ success: false, message: `${provider} 渠道请手动填写模型列表` }, 400)
@@ -721,6 +731,7 @@ async function testOAuthProvider(
   modelId: string,
   baseUrl?: string,
   providerId?: string,
+  region?: string,
 ): Promise<{ success: boolean; message: string; statusCode?: number }> {
   if (provider === 'claude') return testClaude(env, refreshToken, modelId)
   if (provider === 'codex') return testCodex(env, refreshToken, modelId, providerId)
@@ -728,7 +739,7 @@ async function testOAuthProvider(
   if (provider === 'grok') return testGrok(env, refreshToken, modelId)
   if (provider === 'qwen') return testQwen(env, refreshToken, modelId)
   if (provider === 'deepseek') return testDeepSeek(env, refreshToken, modelId)
-  if (provider === 'codebuddy') return testCodebuddy(env, refreshToken, modelId, baseUrl)
+  if (provider === 'codebuddy') return testCodebuddy(env, refreshToken, modelId, baseUrl, region)
   return { success: false, message: `未知 OAuth 渠道类型: ${provider}` }
 }
 
@@ -740,16 +751,17 @@ async function testOAuthProviderRotating(
   modelId: string,
   baseUrl?: string,
   providerId?: string,
+  region?: string,
 ): Promise<{ success: boolean; message: string; statusCode?: number }> {
   const list = (refreshTokens || []).filter((t) => t && t.trim())
   if (list.length === 0) {
     // codex 走中继时凭据在对端，渠道可不配 refresh_token，交给 testCodex 判定
-    if (provider === 'codex') return testOAuthProvider(env, provider, '', modelId, baseUrl, providerId)
+    if (provider === 'codex') return testOAuthProvider(env, provider, '', modelId, baseUrl, providerId, region)
     return { success: false, message: '该渠道未配置任何 refresh_token', statusCode: 0 }
   }
   let last: { success: boolean; message: string; statusCode?: number } = { success: false, message: '连接失败', statusCode: 0 }
   for (let i = 0; i < list.length; i++) {
-    const r = await testOAuthProvider(env, provider, list[i].trim(), modelId, baseUrl, providerId)
+    const r = await testOAuthProvider(env, provider, list[i].trim(), modelId, baseUrl, providerId, region)
     if (r.success) {
       return { ...r, message: list.length > 1 ? `${r.message} (账号 #${i + 1}/${list.length})` : r.message }
     }
@@ -765,15 +777,15 @@ async function testOAuthProviderRotating(
 
 /**
  * 查询 codebuddy 渠道的账号状态。
- * 支持两种入参：传 providerId（取该渠道第 index 个启用凭据）+ baseUrl；
- * 或直接传 refreshToken（新增渠道尚未保存时用表单里的值）。
+ * 支持两种入参：传 providerId（取该渠道第 index 个启用凭据）+ baseUrl + region；
+ * 或直接传 refreshToken / baseUrl / region（新增渠道尚未保存时用表单里的值）。
  */
 export async function handleCodebuddyStatus(c: Context<{ Bindings: Env }>) {
-  const body = await c.req
-    .json<{ refreshToken?: string; providerId?: string; baseUrl?: string; index?: number }>()
-    .catch(() => ({} as { refreshToken?: string; providerId?: string; baseUrl?: string; index?: number }))
+  type CbStatusBody = { refreshToken?: string; providerId?: string; baseUrl?: string; region?: string; index?: number }
+  const body = await c.req.json<CbStatusBody>().catch(() => ({} as CbStatusBody))
   let refreshToken = (body.refreshToken || '').trim()
   let baseUrl = body.baseUrl || ''
+  let region = body.region
   if (!refreshToken && body.providerId) {
     const provider = await getProvider(c.env, body.providerId)
     if (!provider) return c.json<ApiResponse>({ success: false, message: `渠道 "${body.providerId}" 不存在` }, 404)
@@ -781,11 +793,12 @@ export async function handleCodebuddyStatus(c: Context<{ Bindings: Env }>) {
     const idx = Number.isInteger(body.index) ? (body.index as number) : 0
     refreshToken = (keys[idx]?.key || '').trim()
     baseUrl = baseUrl || provider.baseUrl
+    region = region || provider.region
   }
   if (!refreshToken) {
     return c.json<ApiResponse>({ success: false, message: '请先填写 refresh_token，或先保存渠道再查询' }, 400)
   }
-  const r = await fetchCodebuddyStatus(c.env, refreshToken, baseUrl)
+  const r = await fetchCodebuddyStatus(c.env, refreshToken, baseUrl, region)
   return c.json<ApiResponse<typeof r>>({ success: r.ok, data: r, message: r.message })
 }
 

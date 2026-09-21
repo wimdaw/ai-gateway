@@ -523,9 +523,9 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
         return handleDeepSeekRequest(oauthParams, subPath)
       }
       if (providerType === 'codebuddy') {
-        // CodeBuddy(腾讯) 反代：上游强制 stream，非流式由网关本地聚合
+        // CodeBuddy(腾讯) 反代：上游强制 stream，非流式由网关本地聚合；region 决定国内版/国际版
         const { handleCodebuddyRequest } = await import('./codebuddy')
-        return handleCodebuddyRequest(oauthParams, provider.baseUrl)
+        return handleCodebuddyRequest(oauthParams, provider.baseUrl, provider.region)
       }
       const { handleGrokRequest } = await import('./grok')
       return handleGrokRequest({ ...oauthParams, body: subPath === 'responses' ? nativeBody : (body as Record<string, any>) }, subPath === 'responses' ? 'responses-passthrough' : 'translate')
