@@ -11,7 +11,8 @@
  *     { model, project, userAgent, requestType, requestId, request:{...} }（并删除 request.safetySettings）
  *  4. 响应（同样是 { response: {...} } 包装）翻译回 OpenAI，含 SSE 流式
  *
- * 渠道 apiKeys 里每行一个 Google 账号的 Antigravity refresh_token。
+ * 渠道 apiKeys 里每行一个 Google 账号的 Antigravity refresh_token；需要给某个账号单独指定
+ * 项目 ID 时写成 `refresh_token|项目ID`（不写则用渠道级 project），见 parseAgAccount。
  */
 
 import type { Env, UsageRecord } from './types'
@@ -332,11 +333,27 @@ async function recordUsage(p: AntigravityCallParams, usage: AgUsage, ok: boolean
   await addUsageRecord(p.env, record).catch(() => {})
 }
 
+/** 解析渠道 apiKeys 里的一行账号：`refresh_token` 或 `refresh_token|project`。
+ *  Google 的 refresh_token 是 URL-safe 字符集、不含 `|`，故 `|` 作分隔符是安全的。
+ *  单独指定了 project 的账号优先用它，未指定的回落到渠道级 project。 */
+export function parseAgAccount(raw: string): { token: string; project?: string } {
+  const text = (raw || '').trim()
+  const sep = text.indexOf('|')
+  if (sep < 0) return { token: text }
+  const project = text.slice(sep + 1).trim()
+  return { token: text.slice(0, sep).trim(), project: project || undefined }
+}
+
 /** 随机打散账号顺序(负载均衡): 每个请求先用随机账号, 失败再依次尝试其余账号。
  *  避免所有请求都压在第一个账号上, 让多账号的免费额度均匀消耗。
  *  返回的 index 是账号在渠道配置里的原始序号(1 起), 用于 x-ag-account 观测头。 */
-function shuffleAccounts(list: string[]): Array<{ token: string; index: number }> {
-  const arr = list.map((token, i) => ({ token: token.trim(), index: i + 1 }))
+function shuffleAccounts(list: string[]): Array<{ token: string; project?: string; index: number }> {
+  const arr = list
+    .map((raw, i) => {
+      const { token, project } = parseAgAccount(raw)
+      return { token, project, index: i + 1 }
+    })
+    .filter((a) => a.token)
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
     const tmp = arr[i]
@@ -349,7 +366,7 @@ function shuffleAccounts(list: string[]): Array<{ token: string; index: number }
 export async function handleAntigravityRequest(p: AntigravityCallParams): Promise<Response> {
   const accounts = shuffleAccounts((p.refreshTokens || []).filter((t) => t && t.trim()))
   if (accounts.length === 0) {
-    return errorResponse('该 antigravity 渠道未配置凭据：请在「API Key」里每行填入一个 Google 账号的 Antigravity refresh_token（可点「用 Google 账号授权」获取）', 400, 'configuration_error')
+    return errorResponse('该 antigravity 渠道未配置凭据：请在「API Key」里每行填入一个 Google 账号的 Antigravity refresh_token（可点「用 Google 账号授权」获取；需要给某个账号单独指定项目 ID 时写成 refresh_token|项目ID）', 400, 'configuration_error')
   }
   const wantStream = p.body?.stream === true
   const translateOpts = { modelId: p.modelId }
@@ -358,11 +375,12 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
   let lastStatus = 502
 
   for (let i = 0; i < accounts.length; i++) {
-    const { token: refreshToken, index: accountIndex } = accounts[i]
+    const { token: refreshToken, project: accountProject, index: accountIndex } = accounts[i]
     try {
       const hash = await sha256Hex(refreshToken)
       const accessToken = await getAccessToken(p.env, refreshToken)
-      const projectId = await resolveProjectId(p.env, accessToken, hash, p.project)
+      // 账号自己带的 project 优先，其次才是渠道级 project
+      const projectId = await resolveProjectId(p.env, accessToken, hash, accountProject || p.project)
       const envelope = buildEnvelope(p.modelId, projectId, geminiRequest)
       const url = `${AG_GEN_BASE}/${AG_API_VERSION}:${wantStream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`
       const upstream = await fetch(url, {
@@ -430,9 +448,11 @@ export async function testAntigravity(
 ): Promise<{ success: boolean; message: string; statusCode?: number }> {
   if (!refreshToken) return { success: false, message: '未填写 refresh_token', statusCode: 0 }
   try {
-    const hash = await sha256Hex(refreshToken)
-    const accessToken = await getAccessToken(env, refreshToken)
-    const projectId = await resolveProjectId(env, accessToken, hash, project)
+    const { token, project: accountProject } = parseAgAccount(refreshToken)
+    if (!token) return { success: false, message: '未填写 refresh_token', statusCode: 0 }
+    const hash = await sha256Hex(token)
+    const accessToken = await getAccessToken(env, token)
+    const projectId = await resolveProjectId(env, accessToken, hash, accountProject || project)
     const { request: geminiRequest } = openAIToGeminiRequest({ messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 })
     const envelope = buildEnvelope(modelId, projectId, geminiRequest)
     const res = await fetch(`${AG_GEN_BASE}/${AG_API_VERSION}:generateContent`, {
@@ -476,7 +496,9 @@ export async function fetchAntigravityModels(
   refreshToken: string,
 ): Promise<{ success: boolean; models: string[]; message?: string; raw?: unknown }> {
   try {
-    const accessToken = await getAccessToken(env, refreshToken)
+    const { token } = parseAgAccount(refreshToken)
+    if (!token) return { success: false, models: [], message: '未填写 refresh_token' }
+    const accessToken = await getAccessToken(env, token)
     const res = await fetch(`${AG_GEN_BASE}/${AG_API_VERSION}:fetchAvailableModels`, {
       method: 'POST',
       headers: agHeaders(accessToken),
@@ -546,22 +568,40 @@ export interface AgQuotaAccount {
   models: AgQuotaModel[]
 }
 
-/** 查询渠道各账号的额度使用情况（多账号逐个查询，最多 5 个） */
+/** 查询渠道各账号的额度使用情况（账号数不设上限，与后台面板列出的账号数一致）。
+ *  账号多时按 5 个一组并发，避免逐个串行把请求拖长。 */
 export async function fetchAntigravityQuota(
   env: Env,
   refreshTokens: string[],
   project?: string,
 ): Promise<AgQuotaAccount[]> {
-  const list = (refreshTokens || []).filter((t) => t && t.trim()).slice(0, 5)
-  const out: AgQuotaAccount[] = []
-  for (let i = 0; i < list.length; i++) {
-    const account: AgQuotaAccount = { index: i, ok: false, models: [] }
-    try {
-      const token = list[i].trim()
-      const accessToken = await getAccessToken(env, token)
-      const hash = await sha256Hex(token)
+  const entries = (refreshTokens || []).map((raw) => parseAgAccount(raw)).filter((e) => e.token)
+  // 层级查询会给每个账号多花一次上游调用；账号多时省掉它（只少显示层级，不影响额度数据）
+  const withTier = entries.length <= 10
+  const out: AgQuotaAccount[] = new Array(entries.length)
+  const CHUNK = 5
+  for (let start = 0; start < entries.length; start += CHUNK) {
+    const group = entries.slice(start, start + CHUNK)
+    const results = await Promise.all(group.map((entry, k) => fetchOneAgQuota(env, entry, start + k, project, withTier)))
+    results.forEach((r, k) => { out[start + k] = r })
+  }
+  return out
+}
 
-      // 层级信息（best-effort，失败不影响配额查询）
+async function fetchOneAgQuota(
+  env: Env,
+  entry: { token: string; project?: string },
+  index: number,
+  channelProject: string | undefined,
+  withTier: boolean,
+): Promise<AgQuotaAccount> {
+  const account: AgQuotaAccount = { index, ok: false, models: [] }
+  try {
+    const accessToken = await getAccessToken(env, entry.token)
+    const hash = await sha256Hex(entry.token)
+
+    // 层级信息（best-effort，失败不影响配额查询）
+    if (withTier) {
       try {
         const loadRes = await fetch(`${AG_PROD_BASE}/${AG_API_VERSION}:loadCodeAssist`, {
           method: 'POST',
@@ -575,38 +615,38 @@ export async function fetchAntigravityQuota(
           account.tierId = load?.currentTier?.id || (Array.isArray(load?.allowedTiers) ? load.allowedTiers[0]?.id : undefined)
         }
       } catch { /* 忽略 */ }
-
-      account.project = await resolveProjectId(env, accessToken, hash, project).catch(() => undefined)
-
-      const res = await fetch(`${AG_GEN_BASE}/${AG_API_VERSION}:fetchAvailableModels`, {
-        method: 'POST',
-        headers: agHeaders(accessToken),
-        body: '{}',
-        signal: AbortSignal.timeout(30000),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 150)}`)
-      const json: any = JSON.parse(await res.text())
-      const modelsObj = json?.models
-      if (modelsObj && typeof modelsObj === 'object' && !Array.isArray(modelsObj)) {
-        for (const [id, m] of Object.entries<any>(modelsObj)) {
-          if (/^(chat_|tab_)/i.test(id)) continue
-          const qi = m?.quotaInfo || {}
-          account.models.push({
-            id,
-            name: typeof m?.displayName === 'string' ? m.displayName : undefined,
-            remaining: typeof qi.remainingFraction === 'number' ? qi.remainingFraction : null,
-            resetTime: typeof qi.resetTime === 'string' ? qi.resetTime : undefined,
-            recommended: !!m?.recommended,
-            supportsThinking: !!m?.supportsThinking,
-          })
-        }
-        account.models.sort((a, b) => a.id.localeCompare(b.id))
-      }
-      account.ok = true
-    } catch (err) {
-      account.error = (err as Error).message || '查询失败'
     }
-    out.push(account)
+
+    // 账号自带的 project 优先，其次才是渠道级 project
+    account.project = await resolveProjectId(env, accessToken, hash, entry.project || channelProject).catch(() => undefined)
+
+    const res = await fetch(`${AG_GEN_BASE}/${AG_API_VERSION}:fetchAvailableModels`, {
+      method: 'POST',
+      headers: agHeaders(accessToken),
+      body: '{}',
+      signal: AbortSignal.timeout(30000),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 150)}`)
+    const json: any = JSON.parse(await res.text())
+    const modelsObj = json?.models
+    if (modelsObj && typeof modelsObj === 'object' && !Array.isArray(modelsObj)) {
+      for (const [id, m] of Object.entries<any>(modelsObj)) {
+        if (/^(chat_|tab_)/i.test(id)) continue
+        const qi = m?.quotaInfo || {}
+        account.models.push({
+          id,
+          name: typeof m?.displayName === 'string' ? m.displayName : undefined,
+          remaining: typeof qi.remainingFraction === 'number' ? qi.remainingFraction : null,
+          resetTime: typeof qi.resetTime === 'string' ? qi.resetTime : undefined,
+          recommended: !!m?.recommended,
+          supportsThinking: !!m?.supportsThinking,
+        })
+      }
+      account.models.sort((a, b) => a.id.localeCompare(b.id))
+    }
+    account.ok = true
+  } catch (err) {
+    account.error = (err as Error).message || '查询失败'
   }
-  return out
+  return account
 }
