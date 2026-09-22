@@ -20,6 +20,21 @@ function extractUsage(body: unknown): { promptTokens: number; completionTokens: 
   return { promptTokens: 0, completionTokens: 0 }
 }
 
+/**
+ * SSE 响应必须原样透传。
+ * 只要把上游的流读成整段（arrayBuffer/text）再回吐，客户端在整个生成期间就收不到任何字节，
+ * 长的回答会被判超时并重连。代价是无法在读流时解析 usage，流式请求按 0 token 记账。
+ * 返回 null 表示不是流式响应，调用方按原逻辑缓冲处理。
+ */
+function passthroughEventStream(response: Response): Response | null {
+  const contentType = response.headers.get('content-type') || ''
+  if (!contentType.includes('text/event-stream') || !response.body) return null
+  const headers = new Headers()
+  headers.set('Content-Type', contentType)
+  headers.set('Cache-Control', 'no-store')
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
+}
+
 /** 读取响应体（保留原始字节），返回 JSON 解析结果与原始 Response */
 async function readResponseWithUsage(response: Response): Promise<{ body: string; json: unknown }> {
   const buf = await response.arrayBuffer()
@@ -615,6 +630,23 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
           body: forwardPayload,
           signal: AbortSignal.timeout(60000),
         })
+        // 流式响应直接透传，避免整段缓冲导致客户端长时间收不到数据而重连
+        const passthrough = passthroughEventStream(response)
+        if (passthrough) {
+          const record: UsageRecord = {
+            ts: new Date().toISOString(),
+            provider: providerId,
+            model: modelSafe,
+            token: maskedToken,
+            ok: response.ok,
+            status: response.status,
+            promptTokens: 0,
+            completionTokens: 0,
+            latencyMs: Date.now() - startedAt,
+          }
+          await addUsageRecord(c.env, record).catch(() => {})
+          return passthrough
+        }
         // 读取 body 提取 usage 并记录
         const { body: responseBody, json } = await readResponseWithUsage(response)
         const { promptTokens, completionTokens } = extractUsage(json)
@@ -725,6 +757,24 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
             healthUpdated = true
           }
           if (healthUpdated) await writeHealth(c.env, providerId, healthData)
+
+          // 流式响应直接透传，避免整段缓冲导致客户端长时间收不到数据而重连
+          const passthrough = passthroughEventStream(response)
+          if (passthrough) {
+            const record: UsageRecord = {
+              ts: new Date().toISOString(),
+              provider: providerId,
+              model: modelSafe,
+              token: maskedToken,
+              ok: true,
+              status: response.status,
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: Date.now() - startedAt,
+            }
+            await addUsageRecord(c.env, record).catch(() => {})
+            return passthrough
+          }
 
           // 读取 body 提取 usage 并记录
           const { body: responseBody, json } = await readResponseWithUsage(response)
