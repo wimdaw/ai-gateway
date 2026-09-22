@@ -706,11 +706,55 @@ export interface AgQuotaAccount {
   index: number
   ok: boolean
   error?: string
-  /** 账号层级，如 "Gemini Code Assist" / "free-tier" */
+  /** 当前配置层（currentTier），如 "Antigravity"；免费账号一律是 free-tier */
   tier?: string
   tierId?: string
+  /** 订阅层（paidTier）—— Google 把套餐信息放在这里，与 currentTier 是两回事：
+   *  `g1-pro-tier` = Google AI Pro 已生效；`free-tier`/「Antigravity Starter Quota」= 没有套餐加成 */
+  paidTier?: string
+  paidTierId?: string
+  /** Google 关于该账号订阅/资格的原话（未生效时才有），tierNoteUrl 是它给的说明链接 */
+  tierNote?: string
+  tierNoteUrl?: string
+  /** 不具备某个层资格的原因（如 UNSUPPORTED_LOCATION = 所在地区不支持） */
+  ineligible?: string
+  /** 账号邮箱（读 userinfo 得到，用于确认这一行 token 属于哪个 Google 账号） */
+  email?: string
   project?: string
   models: AgQuotaModel[]
+}
+
+/** 从 loadCodeAssist 响应里提取层级/订阅/资格信息（纯函数，便于单测） */
+export function agTierInfo(load: any): {
+  tier?: string
+  tierId?: string
+  paidTier?: string
+  paidTierId?: string
+  tierNote?: string
+  tierNoteUrl?: string
+  ineligible?: string
+} {
+  const cur = load?.currentTier
+  const paid = load?.paidTier
+  const allowed: any[] = Array.isArray(load?.allowedTiers) ? load.allowedTiers : []
+  const fallback = allowed.find((t) => t?.isDefault) || allowed[0]
+  const inelig: any = Array.isArray(load?.ineligibleTiers) ? load.ineligibleTiers[0] : undefined
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+
+  const tierId = str(cur?.id) || str(fallback?.id)
+  const paidTierId = str(paid?.id)
+  // paidTier 与当前层相同 = 没有生效的套餐加成，此时 Google 会给一句解释
+  const subscribed = !!paidTierId && paidTierId !== 'free-tier' && paidTierId !== tierId
+
+  return {
+    tier: str(cur?.name) || str(fallback?.name),
+    tierId,
+    paidTier: str(paid?.name),
+    paidTierId,
+    tierNote: subscribed ? undefined : str(paid?.upgradeSubscriptionText),
+    tierNoteUrl: subscribed ? undefined : str(paid?.upgradeSubscriptionUri),
+    ineligible: inelig ? `${str(inelig.reasonCode) || 'INELIGIBLE'}: ${str(inelig.reasonMessage) || ''}`.trim() : undefined,
+  }
 }
 
 /** 查询渠道各账号的额度使用情况（账号数不设上限，与后台面板列出的账号数一致）。
@@ -721,13 +765,13 @@ export async function fetchAntigravityQuota(
   project?: string,
 ): Promise<AgQuotaAccount[]> {
   const entries = (refreshTokens || []).map((raw) => parseAgAccount(raw)).filter((e) => e.token)
-  // 层级查询会给每个账号多花一次上游调用；账号多时省掉它（只少显示层级，不影响额度数据）
-  const withTier = entries.length <= 10
+  // 层级/订阅/邮箱每个账号要额外两次上游调用；账号多时省掉它们（只少显示身份信息，不影响额度数据）
+  const withIdentity = entries.length <= 10
   const out: AgQuotaAccount[] = new Array(entries.length)
   const CHUNK = 5
   for (let start = 0; start < entries.length; start += CHUNK) {
     const group = entries.slice(start, start + CHUNK)
-    const results = await Promise.all(group.map((entry, k) => fetchOneAgQuota(env, entry, start + k, project, withTier)))
+    const results = await Promise.all(group.map((entry, k) => fetchOneAgQuota(env, entry, start + k, project, withIdentity)))
     results.forEach((r, k) => { out[start + k] = r })
   }
   return out
@@ -738,15 +782,15 @@ async function fetchOneAgQuota(
   entry: { token: string; project?: string },
   index: number,
   channelProject: string | undefined,
-  withTier: boolean,
+  withIdentity: boolean,
 ): Promise<AgQuotaAccount> {
   const account: AgQuotaAccount = { index, ok: false, models: [] }
   try {
     const accessToken = await getAccessToken(env, entry.token)
     const hash = await sha256Hex(entry.token)
 
-    // 层级信息（best-effort，失败不影响配额查询）
-    if (withTier) {
+    // 层级 / 订阅 / 资格（best-effort，失败不影响配额查询）
+    if (withIdentity) {
       try {
         const loadRes = await fetch(`${AG_PROD_BASE}/${AG_API_VERSION}:loadCodeAssist`, {
           method: 'POST',
@@ -755,9 +799,19 @@ async function fetchOneAgQuota(
           signal: AbortSignal.timeout(30000),
         })
         if (loadRes.ok) {
-          const load: any = await loadRes.json().catch(() => null)
-          account.tier = load?.currentTier?.name || (Array.isArray(load?.allowedTiers) ? load.allowedTiers[0]?.name : undefined)
-          account.tierId = load?.currentTier?.id || (Array.isArray(load?.allowedTiers) ? load.allowedTiers[0]?.id : undefined)
+          Object.assign(account, agTierInfo(await loadRes.json().catch(() => null)))
+        }
+      } catch { /* 忽略 */ }
+
+      // 邮箱：用于确认这一行 token 是哪个 Google 账号（Antigravity 授权带 userinfo.email scope）
+      try {
+        const ui = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+          signal: AbortSignal.timeout(15000),
+        })
+        if (ui.ok) {
+          const info: any = await ui.json().catch(() => null)
+          if (typeof info?.email === 'string' && info.email.trim()) account.email = info.email.trim()
         }
       } catch { /* 忽略 */ }
     }

@@ -498,7 +498,7 @@ ${H('管理')}
       </section>
 
       <section id="quota" class="workspace-section" aria-labelledby="quota-title">
-        <div class="section-heading section-heading--admin"><div><h2 id="quota-title">额度</h2><p>Antigravity 各账号的模型剩余额度与重置时间，共 ${agAccountCount} 个账号。</p></div><button class="btn btn-p" onclick="refreshAgAccounts()"><i class="fas fa-sync-alt" aria-hidden="true"></i>刷新账号</button></div>
+        <div class="section-heading section-heading--admin"><div><h2 id="quota-title">额度</h2><p>Antigravity 各账号的模型剩余额度与重置时间，共 ${agAccountCount} 个账号。账号卡片里的邮箱与订阅层（Google AI Pro 等）来自 Google，可用来确认某个 token 属于哪个账号、套餐是否真的生效。</p></div><div class="fc" style="gap:8px;flex-wrap:wrap"><button class="btn btn-p" onclick="queryAllAgQuota()"><i class="fas fa-gauge-high" aria-hidden="true"></i>查询全部额度</button><button class="btn btn-s" onclick="refreshAgAccounts()"><i class="fas fa-sync-alt" aria-hidden="true"></i>刷新账号</button></div></div>
         <div id="quotaBody" class="quota-grid"><div class="form-helper" style="padding:12px 0;grid-column:1/-1">点右上角「刷新账号」重新读取账号；点账号右侧「查询」获取该账号额度。</div></div>
       </section>
 
@@ -1438,18 +1438,7 @@ function renderQuotaSkeleton() {
     box.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-gauge-high" aria-hidden="true"></i><h3>暂无 Antigravity 渠道</h3><p>添加一个 Antigravity 反代渠道后即可查看额度。</p></div>'
     return
   }
-  box.innerHTML = AG_CHANNELS.map(function (ch) {
-    const head = '<div class="fc" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0">' + escapeHtml(ch.name) + ' <code style="font-size:11px;font-weight:400">' + escapeHtml(ch.id) + '</code></h3></div>'
-    let accts = ''
-    if (ch.accountCount > 0) {
-      for (let i = 0; i < ch.accountCount; i++) {
-        accts += '<div class="ag-acct" id="agacct-' + ch.id + '-' + i + '">' + renderAgQuota({ index: i, ok: false, models: [] }, ch.id) + '</div>'
-      }
-    } else {
-      accts = '<div class="form-helper" style="padding:8px 0">该渠道未配置凭据</div>'
-    }
-    return '<article class="quota-card">' + head + accts + '</article>'
-  }).join('')
+  box.innerHTML = renderQuotaCards(AG_CHANNELS)
 }
 
 // 额度重置时间格式化：相对「多久后重置」+ 具体本地时间
@@ -1472,16 +1461,25 @@ function fmtResetLocal(iso) {
 }
 
 function renderAgQuota(a, chId) {
-  const info = '<span class="fc" style="gap:8px;align-items:center;flex-wrap:wrap"><strong>账号 #' + (a.index + 1) + '</strong><span class="form-helper">' + escapeHtml(a.tier || a.tierId || '') + (a.project ? ' · ' + escapeHtml(a.project) : '') + '</span></span>'
+  const mail = a.email ? '<code style="font-size:11px;font-weight:400">' + escapeHtml(a.email) + '</code>' : ''
+  // 订阅看 paidTier：g1-pro-tier 这类才代表 Google AI 套餐真的生效（currentTier 只反映配置层，免费账号一律 free-tier）
+  const paid = (a.paidTierId && a.paidTierId !== 'free-tier')
+    ? '<span style="font-size:11px;padding:1px 6px;border-radius:9px;background:rgba(22,163,74,.14);color:#16a34a;white-space:nowrap">' + escapeHtml(a.paidTier || a.paidTierId) + '</span>'
+    : ''
+  const tierTxt = a.tierId ? (a.tier && a.tier !== 'Antigravity' ? a.tier + ' · ' + a.tierId : a.tierId) : (a.tier || '')
+  const info = '<span class="fc" style="gap:8px;align-items:center;flex-wrap:wrap"><strong>账号 #' + (a.index + 1) + '</strong>' + mail + paid + '<span class="form-helper">' + escapeHtml(tierTxt) + (a.project ? ' · ' + escapeHtml(a.project) : '') + '</span></span>'
   const btn = (chId === undefined || chId === null) ? '' : '<button class="btn btn-s" type="button" data-agq="' + chId + '" data-agi="' + a.index + '"><i class="fas fa-magnifying-glass" aria-hidden="true"></i>查询</button>'
   const head = '<div class="fc" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' + info + btn + '</div>'
+  // Google 原话：套餐未生效时的解释（含说明链接）+ 不具备某层资格的原因
+  const notes = (a.tierNote ? '<div class="form-helper" style="margin-top:4px">Google：' + escapeHtml(a.tierNote) + (a.tierNoteUrl ? ' <a href="' + escapeHtml(a.tierNoteUrl) + '" target="_blank" rel="noopener">说明</a>' : '') + '</div>' : '')
+    + (a.ineligible ? '<div class="al al-e" style="margin-top:4px">' + escapeHtml(a.ineligible) + '</div>' : '')
   if (!a.ok) {
     const isErr = !!a.error
     const bg = isErr ? 'rgba(220,38,38,.08)' : 'rgba(127,127,127,.08)'
     const msg = isErr
       ? '<div class="al al-e" style="margin-top:4px">' + escapeHtml(a.error) + '</div>'
       : '<div class="form-helper" style="margin-top:4px">未查询，点右侧「查询」获取该账号额度。</div>'
-    return '<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:' + bg + '">' + head + msg + '</div>'
+    return '<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:' + bg + '">' + head + msg + notes + '</div>'
   }
   const rows = (a.models || []).map(function (m) {
     const pct = (m.remaining === null || m.remaining === undefined) ? null : Math.round(m.remaining * 100)
@@ -1490,7 +1488,49 @@ function renderAgQuota(a, chId) {
     const reset = m.resetTime ? '<span class="form-helper" style="font-size:11px;white-space:nowrap" title="' + escapeHtml(fmtResetLocal(m.resetTime)) + '">' + escapeHtml(fmtResetIn(m.resetTime)) + '</span>' : ''
     return '<div class="fc" style="justify-content:space-between;gap:8px;padding:2px 0;font-size:12px"><code style="font-size:11px">' + escapeHtml(m.id) + '</code><span class="fc" style="gap:6px;align-items:center">' + reset + bar + '<span style="min-width:38px;text-align:right">' + (pct === null ? '—' : pct + '%') + '</span></span></div>'
   }).join('')
-  return '<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(127,127,127,.08)">' + head + '<div class="quota-models">' + rows + '</div></div>'
+  return '<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(127,127,127,.08)">' + head + notes + '<div class="quota-models">' + rows + '</div></div>'
+}
+
+// 账号卡片区：channels 既可以是账号骨架（有 accountCount、无 accounts），也可以是查询结果（有 accounts）
+function renderQuotaCards(channels) {
+  return channels.map(function (ch) {
+    const head = '<div class="fc" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0">' + escapeHtml(ch.name) + ' <code style="font-size:11px;font-weight:400">' + escapeHtml(ch.id) + '</code></h3></div>'
+    let accts = ''
+    if (ch.accounts && ch.accounts.length) {
+      ch.accounts.forEach(function (a) {
+        accts += '<div class="ag-acct" id="agacct-' + ch.id + '-' + a.index + '">' + renderAgQuota(a, ch.id) + '</div>'
+      })
+    } else if (ch.accountCount > 0) {
+      for (let i = 0; i < ch.accountCount; i++) {
+        accts += '<div class="ag-acct" id="agacct-' + ch.id + '-' + i + '">' + renderAgQuota({ index: i, ok: false, models: [] }, ch.id) + '</div>'
+      }
+    } else {
+      accts = '<div class="form-helper" style="padding:8px 0">该渠道未配置凭据</div>'
+    }
+    return '<article class="quota-card">' + head + accts + '</article>'
+  }).join('')
+}
+
+// 一次查完所有渠道所有账号（每个账号要问一次上游，账号多时慢，故给进度提示）
+async function queryAllAgQuota() {
+  const box = document.getElementById('quotaBody')
+  if (!box) return
+  quotaReady = true
+  box.innerHTML = '<div class="form-helper" style="padding:12px 0;grid-column:1/-1">正在查询全部账号（含订阅层与邮箱），账号较多时需要十几秒…</div>'
+  try {
+    const r = await fetch('/admin/api/antigravity/quota', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    const d = await r.json()
+    if (!d.success || !d.data || !Array.isArray(d.data.channels)) {
+      box.innerHTML = '<div class="al al-e" style="grid-column:1/-1">' + escapeHtml(d.message || '查询失败') + '</div>'
+      return
+    }
+    box.innerHTML = d.data.channels.length
+      ? renderQuotaCards(d.data.channels)
+      : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-gauge-high" aria-hidden="true"></i><h3>暂无 Antigravity 渠道</h3><p>添加一个 Antigravity 反代渠道后即可查看额度。</p></div>'
+    toast('已刷新全部账号额度', 'success')
+  } catch (e) {
+    box.innerHTML = '<div class="al al-e" style="grid-column:1/-1">请求失败</div>'
+  }
 }
 
 // 账号级「查询」：只刷新该渠道该账号的额度
