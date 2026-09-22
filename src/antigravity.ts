@@ -20,6 +20,9 @@ import { getKV } from './storage-adapter'
 import { resolveAccessToken } from './oauth-common'
 import { addUsageRecord } from './storage'
 import { openAIToGeminiRequest, geminiResponseToOpenAI, createOpenAIStream } from './gemini-translate'
+import { KV_KEYS } from './config'
+
+const AG_HEALTH_PREFIX = KV_KEYS.AG_HEALTH_PREFIX
 
 // ===== Antigravity OAuth 客户端（来自 CLIProxyAPI internal/auth/antigravity） =====
 // 凭据不入库: 通过 Worker 密钥注入, 先设置再部署
@@ -363,10 +366,134 @@ function shuffleAccounts(list: string[]): Array<{ token: string; project?: strin
   return arr
 }
 
+// ===== 账号冷却：避免每个请求都在「已知没额度」的账号上白等 =====
+//
+// 背景：Google 按账号计配额，耗尽后该账号对任何请求都只会返 429。原先的纯随机顺序
+// 会让每个请求都先撞上这些账号，逐个重试几分钟量级的失败才轮到能用的账号 —— 实测一次
+// 请求仅响应头就要等 6~12 秒，客户端表现为「卡住/重连」。
+//
+// 做法：把「仍在冷却期」的账号排到队尾（不是剔除！）。健康账号之间照旧随机轮换，
+// 配额消耗依旧摊开；冷却账号在其余账号都失败时仍会被尝试，所以不会出现「本来能成功
+// 的请求因为跳过而失败」；冷却到期自动回到正常轮换池。冷却时长优先取上游报的重置时间。
+
+export type AgAccountHealth = {
+  /** 冷却截止时间戳(Date.now())，早于当前时间即视为已恢复 */
+  cooldownUntil: number
+  /** 最近一次被冷却的原因，便于排查 */
+  reason?: string
+}
+
+export type AgHealthMap = Record<string, AgAccountHealth>
+
+const AG_HEALTH_KEY = (providerId: string) => AG_HEALTH_PREFIX + providerId
+
+/** 配额耗尽但上游没给重置时间时的兜底冷却时长 */
+const AG_COOLDOWN_QUOTA_MS = 30 * 60 * 1000
+/** 凭据/权限问题（401/403）不会在几分钟内自愈 */
+const AG_COOLDOWN_AUTH_MS = 60 * 60 * 1000
+/** 5xx、网络错误等瞬时故障，短冷却即可 */
+const AG_COOLDOWN_TRANSIENT_MS = 5 * 60 * 1000
+
+async function readAgHealth(env: Env, providerId: string): Promise<AgHealthMap> {
+  try {
+    const raw = await getKV(env).get(AG_HEALTH_KEY(providerId))
+    return raw ? (JSON.parse(raw) as AgHealthMap) : {}
+  } catch {
+    return {}
+  }
+}
+
+async function writeAgHealth(env: Env, providerId: string, health: AgHealthMap): Promise<void> {
+  const now = Date.now()
+  // 只留仍在冷却中的账号，避免 KV 膨胀
+  const kept: AgHealthMap = {}
+  for (const [k, v] of Object.entries(health)) {
+    if (v && v.cooldownUntil > now) kept[k] = v
+  }
+  try {
+    if (Object.keys(kept).length > 0) {
+      await getKV(env).put(AG_HEALTH_KEY(providerId), JSON.stringify(kept))
+    } else {
+      await getKV(env).delete(AG_HEALTH_KEY(providerId))
+    }
+  } catch { /* 冷却状态写失败不影响本次转发 */ }
+}
+
+/** 从上游错误文本里解析重置倒计时，如 "Resets in 23h52m40s" / "Resets in 2h" / "Resets in 15m"。 */
+export function parseQuotaResetMs(text: string): number | null {
+  const m = /reset[s]?\s+in\s+(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?/i.exec(text || '')
+  if (!m) return null
+  const h = Number(m[1] || 0)
+  const mi = Number(m[2] || 0)
+  const s = Number(m[3] || 0)
+  const ms = ((h * 60 + mi) * 60 + s) * 1000
+  return ms > 0 ? ms : null
+}
+
+/**
+ * 按冷却状态重排账号：可用（洗牌）→ 冷却已到期（试用）→ 仍在冷却（队尾兜底）。
+ * 三组都会参与尝试，只改顺序，保证故障转移能力不下降。
+ */
+export function orderByCooldown<T extends { hash: string }>(accounts: T[], health: AgHealthMap): T[] {
+  const now = Date.now()
+  const healthy: T[] = []
+  const probation: T[] = []
+  const cooling: T[] = []
+  for (const a of accounts) {
+    const h = health[a.hash]
+    if (!h?.cooldownUntil) healthy.push(a)
+    else if (now >= h.cooldownUntil) probation.push(a)
+    else cooling.push(a)
+  }
+  const shuffle = (arr: T[]): void => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      const tmp = arr[i]
+      arr[i] = arr[j]
+      arr[j] = tmp
+    }
+  }
+  shuffle(healthy)
+  shuffle(probation)
+  shuffle(cooling)
+  return [...healthy, ...probation, ...cooling]
+}
+
 export async function handleAntigravityRequest(p: AntigravityCallParams): Promise<Response> {
-  const accounts = shuffleAccounts((p.refreshTokens || []).filter((t) => t && t.trim()))
-  if (accounts.length === 0) {
+  const parsed = shuffleAccounts((p.refreshTokens || []).filter((t) => t && t.trim()))
+  if (parsed.length === 0) {
     return errorResponse('该 antigravity 渠道未配置凭据：请在「API Key」里每行填入一个 Google 账号的 Antigravity refresh_token（可点「用 Google 账号授权」获取；需要给某个账号单独指定项目 ID 时写成 refresh_token|项目ID）', 400, 'configuration_error')
+  }
+  // 账号以 refresh_token 的 sha256 作为健康状态键，避免把凭据明文写进 KV
+  const accounts = await Promise.all(
+    parsed.map(async (a) => ({ ...a, hash: await sha256Hex(a.token) })),
+  )
+  const health = await readAgHealth(p.env, p.providerId)
+  const ordered = orderByCooldown(accounts, health)
+  let healthChanged = false
+  const coolingCount = ordered.filter((a) => {
+    const h = health[a.hash]
+    return !!h?.cooldownUntil && Date.now() < h.cooldownUntil
+  }).length
+  if (coolingCount > 0) {
+    console.log(`[antigravity] ${p.providerId}: ${coolingCount}/${ordered.length} account(s) in cooldown, tried last`)
+  }
+  /** 记录一次失败并写入冷却（成功则清除该账号的冷却） */
+  const markFailed = (hash: string, reason: string, cooldownMs: number): void => {
+    health[hash] = { cooldownUntil: Date.now() + cooldownMs, reason }
+    healthChanged = true
+  }
+  const markOk = (hash: string): void => {
+    if (health[hash]) {
+      delete health[hash]
+      healthChanged = true
+    }
+  }
+  const persistHealth = async (): Promise<void> => {
+    if (healthChanged) {
+      healthChanged = false
+      await writeAgHealth(p.env, p.providerId, health)
+    }
   }
   const wantStream = p.body?.stream === true
   const translateOpts = { modelId: p.modelId }
@@ -374,10 +501,10 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
   let lastError = ''
   let lastStatus = 502
 
-  for (let i = 0; i < accounts.length; i++) {
-    const { token: refreshToken, project: accountProject, index: accountIndex } = accounts[i]
+
+  for (let i = 0; i < ordered.length; i++) {
+    const { token: refreshToken, project: accountProject, index: accountIndex, hash } = ordered[i]
     try {
-      const hash = await sha256Hex(refreshToken)
       const accessToken = await getAccessToken(p.env, refreshToken)
       // 账号自己带的 project 优先，其次才是渠道级 project
       const projectId = await resolveProjectId(p.env, accessToken, hash, accountProject || p.project)
@@ -392,10 +519,26 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
 
       if (!upstream.ok) {
         lastStatus = upstream.status
-        lastError = `HTTP ${upstream.status}: ${(await readErrorBody(upstream)).slice(0, 300)}`
-        if ([401, 403, 429].includes(upstream.status) || upstream.status >= 500) continue
+        const detail = (await readErrorBody(upstream)).slice(0, 300)
+        lastError = `HTTP ${upstream.status}: ${detail}`
+        if ([401, 403, 429].includes(upstream.status) || upstream.status >= 500) {
+          // 429 通常是按账号的配额耗尽：冷却到上游给出的重置时间，别再让后续请求白撞
+          if (upstream.status === 429) {
+            const reset = parseQuotaResetMs(detail)
+            markFailed(hash, `429 ${detail.slice(0, 120)}`, reset ? reset + 60_000 : AG_COOLDOWN_QUOTA_MS)
+          } else if (upstream.status === 401 || upstream.status === 403) {
+            markFailed(hash, `${upstream.status} ${detail.slice(0, 120)}`, AG_COOLDOWN_AUTH_MS)
+          } else {
+            markFailed(hash, `${upstream.status} ${detail.slice(0, 120)}`, AG_COOLDOWN_TRANSIENT_MS)
+          }
+          continue
+        }
+        await persistHealth()
         return errorResponse(lastError, upstream.status, 'upstream_error')
       }
+
+      markOk(hash)
+      await persistHealth()
 
       if (wantStream && upstream.body) {
         const stream = createOpenAIStream(upstream.body, p.requestedModel, nameMap, () => {}, (finalUsage) => {
@@ -421,9 +564,11 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
     } catch (err) {
       lastError = (err as Error).message || '未知错误'
       lastStatus = 502
+      markFailed(hash, `exception ${lastError.slice(0, 120)}`, AG_COOLDOWN_TRANSIENT_MS)
       continue
     }
   }
+  await persistHealth()
   return errorResponse(`所有 Antigravity 账号均失败，最后一次错误: ${lastError || '未知'}`, lastStatus, 'key_exhausted')
 }
 
