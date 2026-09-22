@@ -544,49 +544,25 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
       const headers = new Headers(response.headers)
       headers.set('Cache-Control', 'no-store')
 
-      // 流式响应必须逐块透传：整体缓冲会让客户端在整个生成期间收不到任何字节，
-      // 长的回答直接被客户端判为超时并重连。用量改用 tee 旁路异步统计，不阻塞下发。
+      // 流式响应必须原样透传：任何对流体的包装（tee 旁路统计、整体缓冲）都会让运行时
+      // 迟迟不向下游吐出数据，客户端表现为长时间无响应后重连。因此这里不解析流内容，
+      // 用量按 0 token 记账（宁可统计失真，也不能让对话卡住）。
       const isEventStream = (response.headers.get('content-type') || '').includes('text/event-stream')
       if (isEventStream && response.body) {
-        const [clientStream, usageStream] = response.body.tee()
-        const ok = response.ok
-        const status = response.status
-        const usagePromise = (async () => {
-          let promptTokens = 0
-          let completionTokens = 0
-          try {
-            const text = await new Response(usageStream).text()
-            for (const rawLine of text.split('\n')) {
-              const line = rawLine.trim()
-              if (!line.startsWith('data:')) continue
-              const payload = line.slice(5).trim()
-              if (!payload || payload === '[DONE]') continue
-              try {
-                const parsed = JSON.parse(payload) as Record<string, unknown>
-                if (parsed && typeof parsed === 'object' && parsed.usage) {
-                  const usage = extractUsage(parsed)
-                  promptTokens = usage.promptTokens
-                  completionTokens = usage.completionTokens
-                }
-              } catch { /* 忽略非 JSON 帧 */ }
-            }
-          } catch { /* 客户端中断时旁路读取失败，忽略 */ }
-          const record: UsageRecord = {
-            ts: new Date().toISOString(),
-            provider: providerId,
-            model: modelSafe,
-            token: maskedToken,
-            ok,
-            status,
-            promptTokens,
-            completionTokens,
-            latencyMs: Date.now() - startedAt,
-          }
-          await addUsageRecord(c.env, record).catch(() => {})
-        })()
-        try { c.executionCtx?.waitUntil(usagePromise) } catch { await usagePromise }
+        const record: UsageRecord = {
+          ts: new Date().toISOString(),
+          provider: providerId,
+          model: modelSafe,
+          token: maskedToken,
+          ok: response.ok,
+          status: response.status,
+          promptTokens: 0,
+          completionTokens: 0,
+          latencyMs: Date.now() - startedAt,
+        }
+        await addUsageRecord(c.env, record).catch(() => {})
         headers.delete('content-length')
-        return new Response(clientStream, { status: response.status, statusText: response.statusText, headers })
+        return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
       }
 
       // 读取 body 提取 usage（opencode 返回 OpenAI 兼容 JSON）
