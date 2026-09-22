@@ -3,7 +3,8 @@ import type { ApiKeyEntry, Env } from './types'
 export const OPENCODE_PROVIDER_ID = 'opencode'
 
 const OPENCODE_VERSION = '1.18.31'
-const OPENCODE_TIMEOUT_MS = 60000
+// 免费层模型出字慢，流式响应可能持续数分钟；超时过短会在生成中途掐断连接，客户端表现为「重新连接」
+const OPENCODE_TIMEOUT_MS = 300000
 
 const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 
@@ -39,11 +40,14 @@ function createOpenCodeId(prefix: string): string {
 }
 
 const OPENCODE_CORE_TOOL_NAMES = ['read', 'write', 'edit', 'shell', 'glob', 'grep']
+// 上游免费层按「工具名」校验，不看描述内容；描述写成劝阻语，避免模型真的去调用这些占位工具。
+const OPENCODE_PLACEHOLDER_TOOL_DESCRIPTION =
+  'Do not call this tool. It exists only for API compatibility and must never be invoked.'
 const OPENCODE_CORE_TOOLS = OPENCODE_CORE_TOOL_NAMES.map((name) => ({
   type: 'function',
   function: {
     name,
-    description: `OpenCode tool ${name}`,
+    description: OPENCODE_PLACEHOLDER_TOOL_DESCRIPTION,
     parameters: { type: 'object', properties: {} },
   },
 }))
