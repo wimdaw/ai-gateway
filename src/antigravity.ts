@@ -547,7 +547,7 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
         }, translateOpts)
         return new Response(stream, {
           status: 200,
-          headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'x-ag-account': String(accountIndex) },
+          headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'x-ag-account': String(accountIndex), 'x-ag-cooldown': String(coolingCount) },
         })
       }
 
@@ -559,7 +559,7 @@ export async function handleAntigravityRequest(p: AntigravityCallParams): Promis
       await recordUsage(p, usage, true, 200)
       return new Response(JSON.stringify(openai), {
         status: 200,
-        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'x-ag-account': String(accountIndex) },
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'x-ag-account': String(accountIndex), 'x-ag-cooldown': String(coolingCount) },
       })
     } catch (err) {
       lastError = (err as Error).message || '未知错误'
