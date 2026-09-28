@@ -92,7 +92,7 @@ ${H('控制台')}
     <div class="admin-rail__head">
       <a class="brand admin-rail__brand" href="/">
         <span class="brand__mark">${icon('cloud', '', 18)}</span>
-        <span><strong>${SITE_CONFIG.title}</strong><small>API CONTROL PANEL</small></span>
+        <span><strong>AI GATEWAY</strong><small>CONTROL PANEL</small></span>
       </a>
     </div>
     <nav class="admin-nav">
@@ -112,9 +112,21 @@ ${H('控制台')}
 
   <div class="admin-main">
     <header class="admin-topbar">
-      <a class="brand" href="/"><span class="brand__mark">${icon('cloud', '', 16)}</span><span class="brand__name">${SITE_CONFIG.title}</span></a>
-      <nav aria-label="移动端控制台导航"><a href="#overview">概览</a><a href="#providers">渠道</a><a href="#quota">额度</a><a href="#proxy-keys">令牌</a><a href="#usage">用量</a><a href="#backup">备份</a></nav>
-      <a class="icon-btn" href="/admin/logout" aria-label="退出登录">${icon('signOut', '', 14)}</a>
+      <div class="admin-topbar__row">
+        <a class="brand" href="/"><span class="brand__mark">${icon('cloud', '', 16)}</span><span class="brand__name">AI GATEWAY</span></a>
+        <div class="admin-topbar__actions">
+          <a href="/" class="icon-btn" title="查看前台">${icon('external', '', 14)}</a>
+          <a class="icon-btn" href="/admin/logout" aria-label="退出登录" title="退出登录">${icon('signOut', '', 14)}</a>
+        </div>
+      </div>
+      <nav class="admin-topbar__nav" aria-label="移动端控制台导航">
+        <a class="is-active" href="#overview">${icon('overview', '', 13)}概览</a>
+        <a href="#providers">${icon('server', '', 13)}渠道<b>${providers.length}</b></a>
+        <a href="#quota">${icon('gauge', '', 13)}额度<b>${agAccountCount}</b></a>
+        <a href="#proxy-keys">${icon('key', '', 13)}令牌<b>${proxyKeys.length}</b></a>
+        <a href="#usage">${icon('chart', '', 13)}用量</a>
+        <a href="#backup">${icon('database', '', 13)}备份</a>
+      </nav>
     </header>
 
     <main class="admin-content">

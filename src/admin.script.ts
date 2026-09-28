@@ -1388,7 +1388,7 @@ async function toggleProxyKey(id, checked) {
 }
 
 // ── 导航与路由 ──
-const adminNavLinks = Array.from(document.querySelectorAll('.admin-nav a[href^="#"]'))
+const adminNavLinks = Array.from(document.querySelectorAll('.admin-nav a[href^="#"], .admin-topbar__nav a[href^="#"]'))
 function setActiveAdminNav(hash) {
   const targetHash = adminNavLinks.some(function (link) { return link.getAttribute('href') === hash }) ? hash : '#overview'
   adminNavLinks.forEach(function (link) {
@@ -1689,7 +1689,7 @@ function showModule() {
       }
     }
   })
-  document.querySelectorAll('.admin-nav__link').forEach(a => {
+  document.querySelectorAll('.admin-nav__link, .admin-topbar__nav a').forEach(a => {
     const href = a.getAttribute('href') || ''
     a.classList.toggle('is-active', href === hash || (hash === '#overview' && href === '#overview'))
   })

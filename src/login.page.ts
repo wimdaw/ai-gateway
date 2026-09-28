@@ -23,7 +23,7 @@ ${H('登录')}
   <div class="shell topbar__inner">
     <a class="brand" href="/" aria-label="AI Gateway 首页">
       <span class="brand__mark">${icon('cloud', '', 18)}</span>
-      <span class="brand__name">${SITE_CONFIG.title}</span>
+      <span class="brand__name">AI GATEWAY</span>
     </a>
     <a href="/" class="btn btn-gh">${icon('arrowLeft', '', 14)}返回首页</a>
   </div>

@@ -50,8 +50,7 @@ ${H('首页')}
   <div class="shell topbar__inner">
     <a class="brand" href="/" aria-label="AI Gateway 首页">
       <span class="brand__mark">${icon('cloud', '', 18)}</span>
-      <span class="brand__name">${SITE_CONFIG.title}</span>
-      <span class="brand__descriptor">API GATEWAY</span>
+      <span class="brand__name">AI GATEWAY</span>
     </a>
     <nav class="topbar__actions" aria-label="主导航">
       ${isLoggedIn
