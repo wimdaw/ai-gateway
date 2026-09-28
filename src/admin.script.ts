@@ -661,7 +661,7 @@ async function refreshAgAccounts() {
   if (!box) return
   box.innerHTML = '<div class="form-helper" style="padding:12px 0;grid-column:1/-1">' + svgIcon('spinner', 'spin', 14) + ' 正在刷新账号…</div>'
   try {
-    const r = await fetch('/admin/api/antigravity/accounts')
+    const r = await fetch('/admin/api/antigravity/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
     const d = await r.json()
     if (!d.success || !d.data || !Array.isArray(d.data.channels)) {
       box.innerHTML = '<div class="al al-e" style="grid-column:1/-1">' + escapeHtml(d.message || '获取账号失败') + '</div>'
