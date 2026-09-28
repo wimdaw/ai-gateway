@@ -1,4 +1,4 @@
-# AI Gateway
+# AI GATEWAY
 
 AI 渠道 API 代理网关 — 统一 `/v1` 接口转发，支持多上游渠道、后台管理、用量统计、备份恢复。
 
@@ -535,7 +535,7 @@ Kimi 有两套 host，`client_id` 相同，网关按渠道的 **API 地址**自�
 ## 架构
 
 ```
-客户端 → /v1/chat/completions → AI Gateway (Cloudflare Workers)
+客户端 → /v1/chat/completions → AI GATEWAY (Cloudflare Workers)
                                     ↓
                               D1 (主存储) ←→ KV (回退)
                                     ↓

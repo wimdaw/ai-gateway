@@ -1,4 +1,4 @@
-# AI Gateway API 文档
+# AI GATEWAY API 文档
 
 ## Base URL
 

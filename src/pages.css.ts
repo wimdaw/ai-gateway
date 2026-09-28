@@ -1,6 +1,6 @@
 export const CSS_CONTENT = `
 /* ==========================================================================
-   AI Gateway - Modern Fintech Design System (Linear / Stripe / Vercel Aesthetic)
+   AI GATEWAY - Modern Fintech Design System (Linear / Stripe / Vercel Aesthetic)
    ========================================================================== */
 
 :root {
@@ -527,10 +527,11 @@ textarea {
 
 .input-wrap input {
   padding-left: 36px;
+  padding-right: 44px;
 }
 
-.input-wrap .svg-icon,
-.input-wrap i {
+/* 仅作用于输入框左侧的字段图标；右侧密码切换按钮内的图标不受影响 */
+.input-wrap > .svg-icon {
   position: absolute;
   left: 12px;
   color: var(--text-subtle);
@@ -539,16 +540,47 @@ textarea {
 
 .password-toggle {
   position: absolute;
-  right: 10px;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   background: transparent;
   border: none;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   cursor: pointer;
-  padding: 4px;
+  z-index: 2;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.password-toggle .svg-icon {
+  position: static;
+  left: auto;
+  top: auto;
+  pointer-events: none;
+  color: inherit;
 }
 
 .password-toggle:hover {
   color: var(--text-primary);
+  background-color: var(--bg-surface-subtle);
+}
+
+@media (max-width: 640px) {
+  .input-wrap input {
+    padding-right: 48px;
+  }
+  .password-toggle {
+    right: 2px;
+    width: 44px;
+    height: 44px;
+  }
 }
 
 /* Alerts */
@@ -2024,6 +2056,7 @@ fieldset.form-group legend {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .site-footer__dot {
@@ -2031,6 +2064,34 @@ fieldset.form-group legend {
   height: 6px;
   border-radius: 50%;
   background-color: var(--success);
+  flex-shrink: 0;
+}
+
+/* 移动端：页脚版权与平台标识保持同一行，超长部分省略 */
+@media (max-width: 640px) {
+  .site-footer {
+    padding-block: 14px;
+    font-size: 11px;
+  }
+  .site-footer__inner {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  .site-footer__copy {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .site-footer__suffix {
+    display: none;
+  }
+  .site-footer__meta {
+    flex-shrink: 0;
+  }
+  .platform-tag {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
 }
 
 .site-footer__link {

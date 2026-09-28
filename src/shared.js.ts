@@ -56,7 +56,7 @@ export function renderSiteFooter(title: string, platform?: string): string {
   <div class="shell site-footer__inner">
     <div class="site-footer__brand">
       <span class="site-footer__dot"></span>
-      <span>© ${new Date().getFullYear()} <a class="site-footer__link" href="${SITE_REPO_URL}" target="_blank" rel="noreferrer">${title}</a> · 统一大模型路由网关</span>
+      <span class="site-footer__copy">© ${new Date().getFullYear()} <a class="site-footer__link" href="${SITE_REPO_URL}" target="_blank" rel="noreferrer">${title}</a><span class="site-footer__suffix"> · 统一大模型路由网关</span></span>
     </div>
     <div class="site-footer__meta">
       <span class="platform-tag">${platform || 'Pages · D1'}</span>

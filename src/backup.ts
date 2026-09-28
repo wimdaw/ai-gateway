@@ -206,7 +206,7 @@ export async function handleTelegramTest(c: Context<{ Bindings: Env }>) {
     const r = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: 'AI Gateway: 这是一个测试消息，配置成功！' }),
+      body: JSON.stringify({ chat_id: chatId, text: 'AI GATEWAY: 这是一个测试消息，配置成功！' }),
     })
     const d = await r.json() as any
     if (d.ok) {
@@ -227,7 +227,7 @@ export async function handleBackupToTelegram(c: Context<{ Bindings: Env }>) {
     const filename = `ai-gateway-backup-${data.exportedAt.replace(/[:.]/g, '-')}.json`
     const fd = new FormData()
     fd.append('chat_id', chatId)
-    fd.append('caption', `AI Gateway 手动快照\n时间：${data.exportedAt}\n渠道与配置：${data.kv.length} 项\n用量记录：${data.usage.length} 条`)
+    fd.append('caption', `AI GATEWAY 手动快照\n时间：${data.exportedAt}\n渠道与配置：${data.kv.length} 项\n用量记录：${data.usage.length} 条`)
     fd.append('document', blob, filename)
 
     const r = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, { method: 'POST', body: fd })

@@ -48,7 +48,7 @@ ${H('首页')}
 <body class="site-page home-page">
 <header class="topbar">
   <div class="shell topbar__inner">
-    <a class="brand" href="/" aria-label="AI Gateway 首页">
+    <a class="brand" href="/" aria-label="AI GATEWAY 首页">
       <span class="brand__mark">${icon('cloud', '', 18)}</span>
       <span class="brand__name">AI GATEWAY</span>
     </a>
