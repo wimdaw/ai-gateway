@@ -881,6 +881,23 @@ textarea {
   color: var(--text-muted);
 }
 
+/* 移动端：端点条目改为「协议路径在上、中文说明在下」的两行卡片，避免换行错位 */
+@media (max-width: 640px) {
+  .ep-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px 12px;
+  }
+  .ep-item small {
+    padding-left: 2px;
+  }
+  .ep-item code {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+
 /* Request Panel (Dark Terminal style) */
 .request-panel {
   background-color: var(--bg-terminal);
@@ -926,6 +943,17 @@ textarea {
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-terminal);
+}
+
+/* 移动端：终端示例自动折行，避免长 URL 溢出被裁切 */
+@media (max-width: 640px) {
+  .request-panel pre {
+    padding: 14px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: hidden;
+  }
 }
 
 .syntax-command { color: #38bdf8; font-weight: 600; }
@@ -1031,6 +1059,13 @@ textarea {
   border-radius: var(--radius-full);
 }
 
+@media (max-width: 640px) {
+  .search-field {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
 .search-field .svg-icon,
 .search-field i {
   position: absolute;
@@ -1056,6 +1091,7 @@ textarea {
   gap: 20px;
   box-shadow: var(--shadow-sm);
   transition: all var(--transition-fast);
+  min-width: 0;
 }
 
 .provider-row:hover {
@@ -1085,10 +1121,15 @@ textarea {
   flex-shrink: 0;
 }
 
+.provider-row__identity > div {
+  min-width: 0;
+}
+
 .provider-row__identity h3 {
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .provider-row__identity p {
@@ -1101,6 +1142,7 @@ textarea {
   flex-wrap: wrap;
   gap: 8px;
   flex: 1;
+  min-width: 0;
 }
 
 .model-token {
@@ -1115,6 +1157,50 @@ textarea {
   color: var(--text-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.model-token code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.model-token .svg-icon {
+  flex-shrink: 0;
+}
+
+/* 移动端：渠道卡片改为「身份 + 状态」同一行、模型标签整行换行，杜绝横向溢出 */
+@media (max-width: 720px) {
+  .provider-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "identity badge" "models models";
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+  .provider-row__identity {
+    grid-area: identity;
+    min-width: 0;
+  }
+  .provider-row__models {
+    grid-area: models;
+    width: 100%;
+  }
+  .provider-row > .status-badge {
+    grid-area: badge;
+  }
+  .provider-row__mark {
+    width: 34px;
+    height: 34px;
+    font-size: 14px;
+  }
+  .empty-inline {
+    font-size: 12px;
+  }
 }
 
 .model-token:hover {
