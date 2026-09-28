@@ -11,6 +11,7 @@ const H = (title: string) => `
   <meta name="theme-color" content="#f8fafc">
   <title>${title} — ${SITE_CONFIG.title}</title>
   <link rel="icon" href="${SITE_CONFIG.favicon}">
+  <link rel="stylesheet" href="${SITE_CONFIG.faCdn}">
   <style>${CSS_CONTENT}</style>
 </head>`
 

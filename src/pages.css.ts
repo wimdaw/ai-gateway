@@ -174,6 +174,23 @@ code, pre {
   to { transform: rotate(360deg); }
 }
 
+.svg-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.svg-icon svg {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  display: block !important;
+}
+
 .shell {
   width: 100%;
   max-width: var(--shell-max);
@@ -1516,6 +1533,11 @@ textarea {
 }
 
 .provider-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   color: var(--text-subtle);
   transition: transform var(--transition-fast);
 }
