@@ -75,6 +75,20 @@ function svgIcon(name, cls, size) {
   return '<span class="svg-icon ' + (cls||'') + '" style="display:inline-flex;align-items:center;justify-content:center;width:' + s + 'px;height:' + s + 'px;min-width:' + s + 'px;min-height:' + s + 'px;line-height:1;vertical-align:middle;flex-shrink:0;" aria-hidden="true">' + code + '</span>';
 }
 
+// ── API 地址盒：网址占满中间可用空间（超长显示省略号），仅当空间过窄时才隐藏 ──
+function fitEndpointUrl() {
+  document.querySelectorAll('.endpoint-box--url code').forEach(function (el) {
+    el.style.display = ''
+    // 可用宽度不足约 12 个字符时，显示省略号已无意义，直接隐藏
+    if (el.clientWidth < 80) el.style.display = 'none'
+  })
+}
+window.addEventListener('resize', function () {
+  clearTimeout(window.__fitEndpointUrlTimer)
+  window.__fitEndpointUrlTimer = setTimeout(fitEndpointUrl, 150)
+})
+fitEndpointUrl()
+
 // ── 工具函数 ──
 function normalizeUrl(url) {
   return url.replace(/\\/$/, '')

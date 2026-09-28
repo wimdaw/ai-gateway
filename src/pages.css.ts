@@ -832,20 +832,60 @@ textarea {
   white-space: nowrap;
 }
 
+/* API 地址盒：标签 / 网址 / 复制按钮始终同一行；网址放不下时由脚本隐藏 */
+.endpoint-box--url {
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+
+.endpoint-box--url code {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.endpoint-box--url .copy-control {
+  flex-shrink: 0;
+}
+
+/* 弹窗中展示的新生成令牌：完整换行显示，避免被省略号截断 */
+.endpoint-box--key {
+  display: block;
+  flex-wrap: wrap;
+}
+
+.endpoint-box--key code {
+  display: block;
+  width: 100%;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow: visible;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
 @media (max-width: 640px) {
-  .endpoint-box {
-    padding: 12px 14px;
+  .endpoint-box--url {
+    padding: 10px;
     gap: 8px;
-    flex-wrap: wrap;
   }
-  .endpoint-box code {
+  .endpoint-box--url .endpoint-box__label {
+    font-size: 10px;
+    padding: 3px 6px;
+    letter-spacing: 0;
+  }
+  .endpoint-box--url code {
+    font-size: 11px;
+  }
+  .endpoint-box--url .copy-control {
+    padding: 6px 8px;
     font-size: 12px;
-    width: 100%;
-    order: 2;
-  }
-  .endpoint-box .copy-control {
-    order: 1;
-    margin-left: auto;
+    gap: 4px;
   }
 }
 

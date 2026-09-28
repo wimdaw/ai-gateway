@@ -160,12 +160,10 @@ ${H('控制台')}
           </div>
         </div>
 
-        <div class="endpoint-box" style="margin-bottom:24px">
-          <div class="fc" style="gap:12px;overflow:hidden">
-            <span class="endpoint-box__label">API BASE URL</span>
-            <code>${escapePageHtml(apiBase)}</code>
-          </div>
-          <button class="btn btn-s copy-control" type="button" data-copy="${escapePageHtml(apiBase)}">
+        <div class="endpoint-box endpoint-box--url" style="margin-bottom:24px" aria-label="API 接入地址">
+          <span class="endpoint-box__label">API BASE URL</span>
+          <code>${escapePageHtml(apiBase)}</code>
+          <button class="btn btn-s copy-control" type="button" data-copy="${escapePageHtml(apiBase)}" aria-label="复制 API 地址">
             ${icon('copy', '', 14)}<span>复制地址</span>
           </button>
         </div>

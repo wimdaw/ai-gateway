@@ -1316,7 +1316,7 @@ async function doGenKey(exp, name) {
   })
   const d = await r.json()
   if (d.success && d.data) {
-    showM('<h3>' + svgIcon('check', 'c-s', 20) + ' 令牌生成成功</h3><p>请妥善保存该 Key，出于安全原因它只展示一次：</p><div class="endpoint-box" style="margin-top:10px"><code>' + d.data.key + '</code><button class="btn btn-s" onclick="copyText(\\'' + d.data.key + '\\',this)">' + svgIcon('copy', '', 14) + ' 复制</button></div><div class="fa"><button class="btn btn-p" onclick="closeM();location.reload()">完成</button></div>')
+    showM('<h3>' + svgIcon('check', 'c-s', 20) + ' 令牌生成成功</h3><p>请妥善保存该 Key，出于安全原因它只展示一次：</p><div class="endpoint-box endpoint-box--key" style="margin-top:10px"><code>' + d.data.key + '</code><button class="btn btn-s" onclick="copyText(\\'' + d.data.key + '\\',this)">' + svgIcon('copy', '', 14) + ' 复制</button></div><div class="fa"><button class="btn btn-p" onclick="closeM();location.reload()">完成</button></div>')
   } else toast(d.message || '生成失败', 'error')
 }
 
@@ -1338,7 +1338,7 @@ async function regenerateKey(id) {
   const d = await r.json()
   if (!d.success) { toast(d.message || '重新生成失败', 'error'); return }
   const nk = d.data.key
-  showM('<h3>' + svgIcon('refresh', 'c-p', 20) + ' 令牌已重新生成</h3><div class="endpoint-box" style="margin-top:10px"><code>' + nk + '</code><button class="btn btn-s" id="rgCopyBtn">' + svgIcon('copy', '', 14) + ' 复制</button></div><div class="fa"><button class="btn btn-p" onclick="closeM()">关闭</button></div>')
+  showM('<h3>' + svgIcon('refresh', 'c-p', 20) + ' 令牌已重新生成</h3><div class="endpoint-box endpoint-box--key" style="margin-top:10px"><code>' + nk + '</code><button class="btn btn-s" id="rgCopyBtn">' + svgIcon('copy', '', 14) + ' 复制</button></div><div class="fa"><button class="btn btn-p" onclick="closeM()">关闭</button></div>')
   const copyBtn = document.getElementById('rgCopyBtn')
   if (copyBtn) copyBtn.onclick = function () { copyText(nk, this); toast('已复制', 'success') }
   toast('已重新生成', 'success')

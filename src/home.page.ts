@@ -68,11 +68,11 @@ ${H('首页')}
       <h1 id="home-title">统一接口规范，调度已配置的所有大模型。</h1>
       <p class="home-hero__lede">统一的 OpenAI / Anthropic 兼容端点。聚合多渠道上游、故障转移、账号轮询与用量跟踪，让大模型调用如同基础设施般稳定简单。</p>
       
-      <div class="endpoint-box" aria-label="API 接入地址">
-        <span class="endpoint-box__label">BASE URL</span>
+      <div class="endpoint-box endpoint-box--url" aria-label="API 接入地址">
+        <span class="endpoint-box__label">API BASE URL</span>
         <code>${escapePageHtml(apiBase)}</code>
         <button class="btn btn-s copy-control" type="button" data-copy="${escapePageHtml(apiBase)}" aria-label="复制 API 地址">
-          ${icon('copy', '', 14)}<span>复制</span>
+          ${icon('copy', '', 14)}<span>复制地址</span>
         </button>
       </div>
     </div>
@@ -172,10 +172,11 @@ ${renderSiteFooter(SITE_CONFIG.title, getPlatformLabel(c.env, c.req.header('host
 <script>
 (function () {
   document.querySelectorAll('.copy-control').forEach(function (button) {
+    var label = button.querySelector('span')
+    var originalLabel = label ? label.textContent : ''
     button.addEventListener('click', async function () {
       var text = button.getAttribute('data-copy') || ''
       var iconWrap = button.querySelector('.svg-icon')
-      var label = button.querySelector('span')
       try {
         await navigator.clipboard.writeText(text)
         button.setAttribute('data-state', 'success')
@@ -188,13 +189,26 @@ ${renderSiteFooter(SITE_CONFIG.title, getPlatformLabel(c.env, c.req.header('host
           if (iconWrap && window.SVG_ICONS && window.SVG_ICONS.copy) {
             iconWrap.innerHTML = window.SVG_ICONS.copy
           }
-          if (label) label.textContent = '复制'
+          if (label) label.textContent = originalLabel
         }, 1800)
       } catch (error) {
         button.setAttribute('data-state', 'error')
       }
     })
   })
+
+  // API 地址盒：网址占满中间可用空间（超长显示省略号），仅当空间过窄时才隐藏
+  function fitEndpointUrl() {
+    document.querySelectorAll('.endpoint-box--url code').forEach(function (el) {
+      el.style.display = ''
+      if (el.clientWidth < 80) el.style.display = 'none'
+    })
+  }
+  window.addEventListener('resize', function () {
+    clearTimeout(window.__fitEndpointUrlTimer)
+    window.__fitEndpointUrlTimer = setTimeout(fitEndpointUrl, 150)
+  })
+  fitEndpointUrl()
 
   var search = document.getElementById('model-search')
   var rows = Array.from(document.querySelectorAll('.provider-row'))
