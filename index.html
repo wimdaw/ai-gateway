@@ -80,7 +80,7 @@ code, pre { font-family: var(--font-mono); }
 .brand__descriptor { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; color: var(--text-muted); background: var(--bg-surface-subtle); padding: 2px 6px; border-radius: var(--radius-sm); margin-left: 4px; }
 .topbar__actions { display: flex; align-items: center; gap: 10px; }
 
-.home-hero { padding-block: 48px 36px; display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 40px; align-items: start; }
+.home-hero { padding-block: 48px 24px; display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 36px; align-items: center; }
 @media (max-width: 900px) { .home-hero { grid-template-columns: 1fr; padding-block: 32px 24px; } }
 .home-hero__copy h1 { font-size: clamp(28px, 4vw, 40px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; color: var(--text-primary); margin-bottom: 14px; }
 .home-hero__lede { font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 24px; max-width: 560px; }
@@ -88,8 +88,12 @@ code, pre { font-family: var(--font-mono); }
 .endpoint-box { background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; box-shadow: var(--shadow-sm); margin-bottom: 20px; }
 .endpoint-box__label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: var(--primary); background: var(--primary-light); padding: 3px 8px; border-radius: var(--radius-xs); flex-shrink: 0; }
 .endpoint-box code { font-size: 13px; color: var(--text-primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.endpoint-box--list { display: block; padding: 16px 18px; }
-.endpoint-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
+.endpoint-box--list { display: block; padding: 18px 20px; margin-bottom: 32px; }
+.endpoint-box__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.endpoint-box__hint { font-size: 12px; color: var(--text-muted); }
+.endpoint-list { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
+@media (max-width: 1080px) { .endpoint-list { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .endpoint-list { grid-template-columns: 1fr; } }
 .ep-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-radius: var(--radius-sm); background-color: var(--bg-surface-subtle); border: 1px solid var(--border-light); }
 .ep-item code { font-size: 11px; color: var(--text-secondary); }
 .ep-item .endpoint-method { font-weight: 700; color: var(--primary); margin-right: 4px; }
@@ -180,28 +184,6 @@ code, pre { font-family: var(--font-mono); }
           <span>复制</span>
         </button>
       </div>
-
-      <div class="endpoint-box endpoint-box--list" aria-label="支持的 API 端点">
-        <span class="endpoint-box__label">ENDPOINTS · 完整协议端点一览</span>
-        <div class="endpoint-list">
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/chat/completions</code><small>对话补全</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/completions</code><small>文本补全</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/embeddings</code><small>向量嵌入</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/speech</code><small>语音合成</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/transcriptions</code><small>语音转文字</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/translations</code><small>语音翻译</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/generations</code><small>文生图</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/edits</code><small>图片编辑</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/variations</code><small>图片变体</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/videos/generations</code><small>文生视频</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/video/generations</code><small>视频(别名)</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">GET</span> /v1/videos/status</code><small>任务状态</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/messages</code><small>Anthropic 消息</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/responses</code><small>响应流</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/moderations</code><small>内容审核</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">GET</span> /v1/models</code><small>模型列表</small></div>
-        </div>
-      </div>
     </div>
 
     <figure class="request-panel" aria-labelledby="request-caption">
@@ -221,6 +203,33 @@ code, pre { font-family: var(--font-mono); }
         <code>provider/model</code>
       </div>
     </figure>
+  </section>
+
+  <section class="shell endpoints-strip" aria-label="支持的 API 端点">
+    <div class="endpoint-box endpoint-box--list">
+      <div class="endpoint-box__header">
+        <span class="endpoint-box__label">ENDPOINTS · 完整协议端点一览</span>
+        <span class="endpoint-box__hint">统一网关自动进行协议映射与故障重试，支持标准流式与非流式调用</span>
+      </div>
+      <div class="endpoint-list">
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/chat/completions</code><small>对话补全</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/completions</code><small>文本补全</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/embeddings</code><small>向量嵌入</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/speech</code><small>语音合成</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/transcriptions</code><small>语音转文字</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/translations</code><small>语音翻译</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/generations</code><small>文生图</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/edits</code><small>图片编辑</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/variations</code><small>图片变体</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/videos/generations</code><small>文生视频</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/video/generations</code><small>视频(别名)</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">GET</span> /v1/videos/status</code><small>任务状态</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/messages</code><small>Anthropic 消息</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/responses</code><small>响应流</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/moderations</code><small>内容审核</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">GET</span> /v1/models</code><small>模型列表</small></div>
+      </div>
+    </div>
   </section>
 
   <section class="shell metrics-strip" aria-label="网关配置概览">

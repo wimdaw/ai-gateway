@@ -76,28 +76,6 @@ ${H('首页')}
           ${icon('copy', '', 14)}<span>复制</span>
         </button>
       </div>
-
-      <div class="endpoint-box endpoint-box--list" aria-label="支持的 API 端点">
-        <span class="endpoint-box__label">ENDPOINTS · 完整协议端点一览</span>
-        <div class="endpoint-list">
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/chat/completions</code><small>对话补全</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/completions</code><small>文本补全</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/embeddings</code><small>向量嵌入</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/speech</code><small>语音合成</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/transcriptions</code><small>语音转文字</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/translations</code><small>语音翻译</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/generations</code><small>文生图</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/edits</code><small>图片编辑</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/variations</code><small>图片变体</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/videos/generations</code><small>文生视频</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/video/generations</code><small>视频(别名)</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">GET</span> /v1/videos/status</code><small>任务状态</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/messages</code><small>Anthropic 消息</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/responses</code><small>响应流</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/moderations</code><small>内容审核</small></div>
-          <div class="ep-item"><code><span class="endpoint-method">GET</span> /v1/models</code><small>模型列表</small></div>
-        </div>
-      </div>
     </div>
 
     <figure class="request-panel" aria-labelledby="request-caption">
@@ -117,6 +95,33 @@ ${H('首页')}
         <code>provider/model</code>
       </div>
     </figure>
+  </section>
+
+  <section class="shell endpoints-strip" aria-label="支持的 API 端点">
+    <div class="endpoint-box endpoint-box--list">
+      <div class="endpoint-box__header">
+        <span class="endpoint-box__label">ENDPOINTS · 完整协议端点一览</span>
+        <span class="endpoint-box__hint">统一网关自动进行协议映射与故障重试，支持标准流式与非流式调用</span>
+      </div>
+      <div class="endpoint-list">
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/chat/completions</code><small>对话补全</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/completions</code><small>文本补全</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/embeddings</code><small>向量嵌入</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/speech</code><small>语音合成</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/transcriptions</code><small>语音转文字</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/audio/translations</code><small>语音翻译</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/generations</code><small>文生图</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/edits</code><small>图片编辑</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/images/variations</code><small>图片变体</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/videos/generations</code><small>文生视频</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/video/generations</code><small>视频(别名)</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">GET</span> /v1/videos/status</code><small>任务状态</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/messages</code><small>Anthropic 消息</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/responses</code><small>响应流</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">POST</span> /v1/moderations</code><small>内容审核</small></div>
+        <div class="ep-item"><code><span class="endpoint-method">GET</span> /v1/models</code><small>模型列表</small></div>
+      </div>
+    </div>
   </section>
 
   <section class="shell metrics-strip" aria-label="网关配置概览">
