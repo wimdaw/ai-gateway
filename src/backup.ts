@@ -174,18 +174,29 @@ export interface TelegramConfig {
   chatId: string
 }
 
-async function getTgConfig(env: Env): Promise<TelegramConfig | null> {
+export async function getTgConfig(env: Env): Promise<TelegramConfig | null> {
   if (!env.DB) return null
   const res = await env.DB.prepare("SELECT value FROM kv_store WHERE key = 'telegram:backup'").first<{ value: string }>()
   if (!res || !res.value) return null
   try { return JSON.parse(res.value) as TelegramConfig } catch { return null }
 }
 
-async function saveTgConfig(env: Env, botToken: string, chatId: string): Promise<void> {
+export async function saveTgConfig(env: Env, botToken: string, chatId: string): Promise<void> {
   if (!env.DB) return
   await env.DB.prepare(
     "INSERT INTO kv_store (key, value) VALUES ('telegram:backup', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
   ).bind(JSON.stringify({ botToken, chatId })).run()
+}
+
+export async function handleTelegramSave(c: Context<{ Bindings: Env }>) {
+  const { botToken, chatId } = await c.req.json<TelegramConfig>()
+  if (!botToken || !chatId) return c.json<ApiResponse>({ success: false, message: '请填写 Bot Token 和 Chat ID' }, 400)
+  try {
+    await saveTgConfig(c.env, botToken, chatId)
+    return c.json<ApiResponse>({ success: true, message: 'Telegram 备份配置已成功保存' })
+  } catch (e) {
+    return c.json<ApiResponse>({ success: false, message: '保存失败: ' + (e as Error).message }, 500)
+  }
 }
 
 export async function handleTelegramTest(c: Context<{ Bindings: Env }>) {

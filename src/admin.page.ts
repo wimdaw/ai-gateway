@@ -8,6 +8,7 @@ import { icon, SHARED_JS, renderSiteFooter } from './shared.js'
 import { storageTypeLabel } from './storage-adapter'
 import { AZURE_TTS_VOICES, voiceGroup } from './azure-voices'
 import { ADMIN_CLIENT_SCRIPT } from './admin.script'
+import { getTgConfig } from './backup'
 
 function getPlatformLabel(env: any, host?: string): string {
   const isWorker = typeof host === 'string' && host.includes('workers.dev')
@@ -63,6 +64,7 @@ const H = (title: string) => `
 export async function renderAdminPage(c: Context<{ Bindings: Env }>) {
   const providers = await getProviders(c.env)
   const proxyKeys = await getProxyKeys(c.env)
+  const tgConfig = await getTgConfig(c.env).catch(() => null)
   const codexRelay = await getCodexUpstreamRelay(c.env).catch(() => null)
   const codexRelayHost = codexRelay ? codexRelay.url.replace(/^https?:\/\//, '') : ''
   const enabledProvidersCount = providers.filter((p) => p.enabled).length
@@ -616,10 +618,11 @@ ${H('控制台')}
           </div>
           <div class="rank-card">
             <div class="panel-heading" style="border:none;padding:0;margin-bottom:14px"><div><span class="panel-heading__mark">${icon('paperPlane', '', 16)}</span><div><h3>Telegram 自动化备份</h3><p>通过 Bot 将加密备份推送到指定会话。</p></div></div></div>
-            <div class="fg"><label>Telegram Bot Token</label><input type="password" id="tgToken" placeholder="123456:ABC-DEF..." autocomplete="off"></div>
-            <div class="fg"><label>Telegram Chat ID</label><input type="text" id="tgChat" placeholder="例如：987654321"></div>
+            <div class="fg"><label>Telegram Bot Token</label><input type="password" id="tgToken" value="${escapePageHtml(tgConfig?.botToken || '')}" placeholder="123456:ABC-DEF..." autocomplete="off"></div>
+            <div class="fg"><label>Telegram Chat ID</label><input type="text" id="tgChat" value="${escapePageHtml(tgConfig?.chatId || '')}" placeholder="例如：987654321"></div>
             <div class="fc" style="gap:8px;flex-wrap:wrap;margin-top:10px">
               <button class="btn btn-s" onclick="telegramTest()">${icon('plug', '', 14)} 测试通道</button>
+              <button class="btn btn-s" onclick="telegramSave()">${icon('save', '', 14)} 保存配置</button>
               <button class="btn btn-p" onclick="backupToTelegram()">${icon('paperPlane', '', 14)} 推送备份</button>
             </div>
             <div id="bk-tg-result" aria-live="polite"></div>

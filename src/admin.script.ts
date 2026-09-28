@@ -1624,6 +1624,25 @@ async function telegramTest() {
   bkResult('bk-tg-result', d.success, d.message || '测试失败')
 }
 
+async function telegramSave() {
+  const el = document.getElementById('bk-tg-result')
+  showSpinner(el)
+  const p = tgParams()
+  if (!p.botToken || !p.chatId) { bkResult('bk-tg-result', false, '请先填写 Bot Token 和 USER ID'); return }
+  try {
+    const r = await fetch('/admin/api/telegram/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(p),
+    })
+    const d = await r.json()
+    bkResult('bk-tg-result', d.success, d.message || (d.success ? '配置已保存' : '保存失败'))
+    if (d.success) toast('Telegram 备份配置已保存', 'success')
+  } catch (e) {
+    bkResult('bk-tg-result', false, '保存请求失败')
+  }
+}
+
 async function backupToTelegram() {
   const el = document.getElementById('bk-tg-result')
   showSpinner(el)
