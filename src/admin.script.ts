@@ -714,15 +714,15 @@ function renderAgQuota(a, chId) {
     const isErr = !!a.error
     const msg = isErr
       ? '<div class="al al-e" style="margin-top:8px">' + escapeHtml(a.error) + '</div>'
-      : '<div class="form-helper" style="margin-top:8px">未查询，点击右侧「查询」获取额度详情。</div>'
+      : '<div class="form-helper" style="margin-top:8px">未查询，点击上方「查询」获取额度详情。</div>'
     return '<div class="quota-row">' + head + msg + '</div>'
   }
   const rows = (a.models || []).map(function (m) {
     const pct = (m.remaining === null || m.remaining === undefined) ? null : Math.round(m.remaining * 100)
     const color = pct === null ? 'var(--text-subtle)' : pct > 50 ? 'var(--success)' : pct > 10 ? 'var(--warning)' : 'var(--danger)'
-    const bar = pct === null ? '' : '<span style="display:inline-block;width:90px;height:6px;border-radius:3px;background:var(--bg-surface-subtle);overflow:hidden;vertical-align:middle;margin-inline:8px"><span style="display:block;height:100%;width:' + pct + '%;background:' + color + '"></span></span>'
+    const bar = pct === null ? '' : '<span class="quota-bar"><span class="quota-bar__fill" style="width:' + pct + '%;background:' + color + '"></span></span>'
     const reset = m.resetTime ? '<span class="form-helper" style="font-size:11px" title="' + escapeHtml(fmtResetLocal(m.resetTime)) + '">' + escapeHtml(fmtResetIn(m.resetTime)) + '</span>' : ''
-    return '<div class="quota-row__info"><code>' + escapeHtml(m.id) + '</code><span class="fc">' + reset + bar + '<strong style="min-width:36px;text-align:right">' + (pct === null ? '—' : pct + '%') + '</strong></span></div>'
+    return '<div class="quota-row__info"><code>' + escapeHtml(m.id) + '</code><span class="fc" style="gap:6px;flex-wrap:wrap">' + reset + bar + '<strong style="min-width:36px;text-align:right">' + (pct === null ? '—' : pct + '%') + '</strong></span></div>'
   }).join('')
   return '<div class="quota-row">' + head + '<div style="margin-top:10px">' + rows + '</div></div>'
 }

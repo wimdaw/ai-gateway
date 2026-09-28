@@ -112,13 +112,7 @@ ${H('控制台')}
 
   <div class="admin-main">
     <header class="admin-topbar">
-      <div class="admin-topbar__row">
-        <a class="brand" href="/"><span class="brand__mark">${icon('cloud', '', 16)}</span><span class="brand__name">AI GATEWAY</span></a>
-        <div class="admin-topbar__actions">
-          <a href="/" class="icon-btn" title="查看前台">${icon('external', '', 14)}</a>
-          <a class="icon-btn" href="/admin/logout" aria-label="退出登录" title="退出登录">${icon('signOut', '', 14)}</a>
-        </div>
-      </div>
+      <a class="brand" href="/"><span class="brand__mark">${icon('cloud', '', 16)}</span><span class="brand__name">AI GATEWAY</span></a>
       <nav class="admin-topbar__nav" aria-label="移动端控制台导航">
         <a class="is-active" href="#overview">${icon('overview', '', 13)}概览</a>
         <a href="#providers">${icon('server', '', 13)}渠道<b>${providers.length}</b></a>
@@ -127,6 +121,10 @@ ${H('控制台')}
         <a href="#usage">${icon('chart', '', 13)}用量</a>
         <a href="#backup">${icon('database', '', 13)}备份</a>
       </nav>
+      <div class="admin-topbar__actions">
+        <a href="/" class="icon-btn" title="查看前台" aria-label="查看前台">${icon('external', '', 14)}</a>
+        <a class="icon-btn" href="/admin/logout" aria-label="退出登录" title="退出登录">${icon('signOut', '', 14)}</a>
+      </div>
     </header>
 
     <main class="admin-content">
@@ -550,7 +548,7 @@ ${H('控制台')}
               <span class="key-icon">${icon('key', '', 18)}</span>
               <div>
                 <div class="kv">
-                  <span id="kv-${escapePageHtml(k.id)}" data-full="${escapePageHtml(k.key)}" data-vis="0">${escapePageHtml(k.key.length > 12 ? k.key.substring(0, 8) + '*****' + k.key.substring(k.key.length - 4) : k.key)}</span>
+                  <span class="kv__value" id="kv-${escapePageHtml(k.id)}" data-full="${escapePageHtml(k.key)}" data-vis="0">${escapePageHtml(k.key.length > 12 ? k.key.substring(0, 8) + '*****' + k.key.substring(k.key.length - 4) : k.key)}</span>
                   <button class="icon-btn" onclick="toggleKeyVis('${k.id}')" title="明文切换">${icon('eye', '', 14)}</button>
                   <button class="icon-btn" onclick='copyText("${escapePageHtml(k.key)}",this)' title="复制">${icon('copy', '', 14)}</button>
                   <button class="icon-btn" onclick="regenerateKey('${k.id}')" title="重新生成">${icon('refresh', '', 14)}</button>

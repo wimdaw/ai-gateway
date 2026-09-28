@@ -1528,31 +1528,36 @@ textarea {
   .admin-rail {
     display: none;
   }
+  /* 移动端顶部栏：品牌 + 导航 + 操作保持在同一栏（导航可横向滑动） */
   .admin-topbar {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .admin-topbar__row {
-    display: flex;
     align-items: center;
-    justify-content: space-between;
-    width: 100%;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+  .admin-topbar .brand__name {
+    display: none;
   }
   .admin-topbar__actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .admin-topbar__actions .icon-btn {
+    width: 30px;
+    height: 30px;
   }
   .admin-topbar__nav {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    padding-bottom: 2px;
-    width: 100%;
+    padding-bottom: 0;
   }
   .admin-topbar__nav::-webkit-scrollbar {
     display: none;
@@ -1560,8 +1565,8 @@ textarea {
   .admin-topbar__nav a {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 5px 12px;
+    gap: 4px;
+    padding: 5px 10px;
     font-size: 12px;
     font-weight: 500;
     border-radius: var(--radius-full);
@@ -1837,6 +1842,59 @@ textarea {
   font-weight: 500;
 }
 
+/* 渠道卡片头：参照老站始终保持单行（左侧身份 + 右侧开关/状态），窄屏隐藏头像让出空间 */
+.ps {
+  flex-wrap: nowrap;
+}
+
+.ps .l {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ps > .fc {
+  flex-shrink: 0;
+}
+
+@media (max-width: 520px) {
+  .ps {
+    padding: 14px 16px;
+    gap: 10px;
+  }
+  .ps .l {
+    gap: 10px;
+  }
+  .provider-avatar {
+    display: none;
+  }
+  .ps h3 {
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+  .pu {
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    line-height: 1.5;
+  }
+  .pu > * {
+    white-space: nowrap;
+  }
+  .ps > .fc {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+/* 表单行：参照老站保持单行、输入框可收缩 */
+.field-row {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.field-row .fx1 {
+  min-width: 0;
+}
+
 .pd {
   display: none;
   padding: 24px;
@@ -1883,11 +1941,12 @@ fieldset.form-group legend {
   padding-inline: 8px;
 }
 
+/* 底部操作区：参照老站「状态在上、按钮换行右对齐」的布局 */
 .detail-actions,
 .panel-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 12px;
   margin-top: 20px;
   padding-top: 16px;
@@ -1897,15 +1956,24 @@ fieldset.form-group legend {
 .detail-actions > div:last-child,
 .panel-actions > div:last-child {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .detail-actions > div:last-child > .btn,
+  .panel-actions > div:last-child > .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
 }
 
 /* ==========================================================================
    Quota & Usage & Backup Grid Styles
    ========================================================================== */
 
-.quota-grid,
 .rank-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
@@ -1913,8 +1981,15 @@ fieldset.form-group legend {
   margin-top: 16px;
 }
 
+/* 额度卡片整行铺满，内部账号按多列铺开，避免右侧大片留白 */
+.quota-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 16px;
+}
+
 @media (max-width: 640px) {
-  .quota-grid,
   .rank-grid {
     grid-template-columns: 1fr;
   }
@@ -1929,10 +2004,62 @@ fieldset.form-group legend {
   box-shadow: var(--shadow-sm);
 }
 
+/* 账号卡片内部：PC 端两列铺满整行，窄屏自适应为单列 */
+.quota-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-content: start;
+}
+
+@media (max-width: 380px) {
+  .quota-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.quota-card > .quota-card__head {
+  grid-column: 1 / -1;
+}
+
+.quota-card > .ag-acct:only-of-type {
+  grid-column: 1 / -1;
+}
+
+/* 额度条目在窄列中允许换行，避免挤压错位 */
+.quota-card .quota-row__info {
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+.quota-card .quota-row__info > span:last-child {
+  white-space: nowrap;
+}
+
+.quota-bar {
+  display: inline-block;
+  flex: 1 1 48px;
+  min-width: 32px;
+  max-width: 88px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background-color: var(--bg-surface-subtle);
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.quota-bar__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+}
+
 .quota-card__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-light);
@@ -2004,15 +2131,16 @@ fieldset.form-group legend {
   gap: 12px;
 }
 
+/* 令牌卡片：参照老站「上信息 / 下操作」的竖向布局，样式维持新版质感 */
 .ki {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 16px 20px;
+  padding: 16px 18px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
   box-shadow: var(--shadow-sm);
   transition: all var(--transition-fast);
 }
@@ -2024,8 +2152,14 @@ fieldset.form-group legend {
 
 .key-main {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.key-main > div {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .key-icon {
@@ -2044,16 +2178,25 @@ fieldset.form-group legend {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
 }
 
+.kv__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .key-meta {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   margin-top: 4px;
   font-size: 12px;
   color: var(--text-muted);
@@ -2063,12 +2206,22 @@ fieldset.form-group legend {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.key-meta p {
+  min-width: 0;
 }
 
 .key-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* ==========================================================================
