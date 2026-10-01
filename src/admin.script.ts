@@ -1132,21 +1132,72 @@ function getKeys(id) {
   }).filter(Boolean)
 }
 
-function addKeyRow(id) {
-  const inp = document.getElementById('nk-' + id), v = inp.value.trim()
-  if (!v) { toast('请输入 Key', 'error'); return }
-  const c = document.getElementById('keys-' + id), idx = c.querySelectorAll('[data-kidx]').length
+function keyRowHtml(id, idx, key, enabled) {
   const d = document.createElement('div')
   d.className = 'fc mb-3 field-row'
   d.dataset.kidx = idx
-  d.innerHTML = '<input type="text" value="' + escapeHtml(v) + '" class="fx1" id="k-' + id + '-' + idx + '"><label class="tg"><input type="checkbox" checked id="ken-' + id + '-' + idx + '"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)">' + svgIcon('copy', '', 14) + '</button><button class="icon-btn" onclick="testKeyRow(\\'' + id + '\\',' + idx + ')">' + svgIcon('plug', '', 14) + '</button><button class="icon-btn" onclick="rmKeyRow(\\'' + id + '\\',' + idx + ')">' + svgIcon('times', '', 14) + '</button>'
-  c.appendChild(d)
-  inp.value = ''
+  d.innerHTML = '<input type="text" value="' + escapeHtml(key || '') + '" class="fx1" id="k-' + id + '-' + idx + '"><label class="tg"><input type="checkbox" ' + (enabled ? 'checked' : '') + ' id="ken-' + id + '-' + idx + '" onchange="keyToggle(\'' + id + '\', this)"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)">' + svgIcon('copy', '', 14) + '</button><button class="icon-btn" onclick="testKeyRow(\'' + id + '\',' + idx + ')">' + svgIcon('plug', '', 14) + '</button><button class="icon-btn" onclick="rmKeyRow(\'' + id + '\',' + idx + ', this)">' + svgIcon('times', '', 14) + '</button>'
+  return d
 }
 
-function rmKeyRow(id, idx) {
-  const el = document.querySelector('#keys-' + id + ' [data-kidx="' + idx + '"]')
-  if (el) el.remove()
+async function keysDelta(id, payload) {
+  const r = await fetch('/admin/api/providers/' + encodeURIComponent(id) + '/keys', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  })
+  const d = await r.json()
+  if (!d.success) { toast(d.message || '操作失败', 'error'); return null }
+  return d.data
+}
+
+async function addKeyRow(id) {
+  const inp = document.getElementById('nk-' + id), v = inp.value.trim()
+  if (!v) { toast('请输入 Key', 'error'); return }
+  const res = await keysDelta(id, { add: [v] })
+  if (!res) return
+  const c = document.getElementById('keys-' + id), idx = c.querySelectorAll('[data-kidx]').length
+  c.appendChild(keyRowHtml(id, idx, v, true))
+  inp.value = ''
+  toast('已添加 (共 ' + res.total + ' 个)', 'success')
+}
+
+async function rmKeyRow(id, idx, el) {
+  const row = el && el.closest ? el.closest('[data-kidx]') : document.querySelector('#keys-' + id + ' [data-kidx="' + idx + '"]')
+  const key = row ? (row.querySelector('input.fx1') || {}).value || '' : ''
+  if (!key) { if (row) row.remove(); return }
+  const res = await keysDelta(id, { remove: [key] })
+  if (!res) return
+  if (row) row.remove()
+  toast('已删除 (剩余 ' + res.total + ' 个)', 'success')
+}
+
+async function keyToggle(id, cb) {
+  const row = cb.closest('[data-kidx]')
+  const key = (row.querySelector('input.fx1') || {}).value || ''
+  if (!key) return
+  const res = await keysDelta(id, cb.checked ? { enable: [key] } : { disable: [key] })
+  if (!res) { cb.checked = !cb.checked; return }
+  toast(cb.checked ? '已启用' : '已停用', 'success')
+}
+
+async function loadMoreKeys(id) {
+  const c = document.getElementById('keys-' + id)
+  const btnBox = document.getElementById('kmore-' + id)
+  const btn = btnBox ? btnBox.querySelector('button') : null
+  if (btn) { btn.disabled = true; btn.textContent = '加载中…' }
+  try {
+    const offset = c.querySelectorAll('[data-kidx]').length
+    const r = await fetch('/admin/api/providers/' + encodeURIComponent(id) + '/keys?offset=' + offset + '&size=100')
+    const d = await r.json()
+    if (!d.success) { toast(d.message || '加载失败', 'error'); return }
+    const start = offset
+    d.data.keys.forEach(function (k, i) { c.appendChild(keyRowHtml(id, start + i, k.key, k.enabled)) })
+    window.__keysTotal = window.__keysTotal || {}
+    window.__keysTotal[id] = d.data.total
+    if (btnBox) {
+      if (d.data.hasMore) btn.textContent = '查看更多(已显示 ' + c.querySelectorAll('[data-kidx]').length + ' / 共 ' + d.data.total + ')'
+      else btnBox.remove()
+    }
+  } catch (e) { toast('加载失败: ' + e, 'error') } finally { if (btn) btn.disabled = false }
 }
 
 async function testKeyRow(id, idx) {
@@ -1243,7 +1294,7 @@ async function save(id) {
   const r = await fetch('/admin/api/providers/' + encodeURIComponent(id), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: nm, baseUrl: url, apiType, type, region: isCodebuddyType(type) ? cbRegionValue(id) : undefined, apiKeys: keys, models, mirrorUrls, enabled, newId, project: provProject(id) || undefined, location: provVertexLocation(id) || undefined, ...ttsConf })
+    body: JSON.stringify({ name: nm, baseUrl: url, apiType, type, region: isCodebuddyType(type) ? cbRegionValue(id) : undefined, apiKeys: (type !== 'vertex' && type !== 'devin') ? undefined : keys, models, mirrorUrls, enabled, newId, project: provProject(id) || undefined, location: provVertexLocation(id) || undefined, ...ttsConf })
   })
   const d = await r.json()
   if (d.success) { toast('已保存', 'success'); location.reload() }
