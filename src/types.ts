@@ -22,6 +22,8 @@ export interface Provider {
    *          | cline (cline.bot 网页反代, 凭据为 WorkOS 设备码流程获取的 refreshToken)
    *          | kimiweb (Kimi 网页版反代, 凭据为 www.kimi.ai 的 access_token/refresh_token)
    *          | geminiweb (Gemini 网页版反代, 凭据为 gemini.google.com 的 Cookie)
+   *          | minimaxweb (MiniMax Agent 网页反代, 凭据为 token|agentId|uuid|deviceId|userId)
+   *          | lingxi (中国移动灵犀网页反代, 凭据为 Authorization(Basic)+userId)
    *
    * geminiweb: 与 type=antigravity（Google 官方 Antigravity OAuth）是两套体系，凭据不通用。
    *            凭据为浏览器登录 gemini.google.com 后的 Cookie（__Secure-1PSID / __Secure-3PSID /
