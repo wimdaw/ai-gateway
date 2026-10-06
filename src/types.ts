@@ -20,10 +20,16 @@ export interface Provider {
    *          | claude | codex | kimi | grok | qwen | codebuddy (OAuth 反代, 复刻 CLIProxyAPI)
    *          | deepseek (官方 API Key / 网页 userToken 反代) | zai (Z.AI 预设, 缺省 openai)
    *          | cline (cline.bot 网页反代, 凭据为 WorkOS 设备码流程获取的 refreshToken)
+   *          | kimiweb (Kimi 网页版反代, 凭据为 www.kimi.ai 的 access_token/refresh_token)
    *
    * codebuddy: 腾讯 CodeBuddy/WorkBuddy 账号反代（凭据为 refresh_token，上游 /v2/chat/completions
    *            强制 stream，非流式由网关本地聚合）。区域由 region 字段显式指定，
    *            留空时回退按 baseUrl 是否含 workbuddy.ai 判定。
+   *
+   * kimiweb: 与 type=kimi（Kimi Coding，api.kimi.ai/coding）是两套独立体系，凭据不通用。
+   *          凭据为浏览器登录 www.kimi.ai 后 Local Storage 里的 access_token(JWT) 或
+   *          refresh_token，每行一个账号自动轮换；refresh_token 由网关自动续期。
+   *          模型目录实时取自上游 GetAvailableModels（k3 / k3-agent-ultra / k2d6）。
    *
    * cline: 参考 Patrick-mufeng/cline-free 逆向的 cline.bot 上游协议。凭据为 refreshToken
    *            （每行一个账号，可后台「授权登录」自动获取）；免费通道自动剥 max_tokens +
