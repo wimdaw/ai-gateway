@@ -38,18 +38,71 @@ type ConnectFn = (
 let _connect: ConnectFn | null | undefined
 
 /**
- * 解析当前运行时能不能拿到 connect()。Cloudflare Workers/Pages 走 cloudflare:sockets；
- * Node 运行时没有该模块，返回 null，调用方回退到 fetch。
+ * 解析当前运行时能不能拿到 connect()。
+ * Cloudflare Workers/Pages 走 cloudflare:sockets；Node 走 node:tls 自己拼一个
+ * 同形状的 connect()。两边都拿不到才返回 null，调用方回退 fetch。
+ * 用 new Function 包一层是为了让 esbuild 不要静态解析 node:tls（Pages 是
+ * platform=neutral 打的，解析不到也不该被打进去）。
  */
 async function resolveConnect(): Promise<ConnectFn | null> {
   if (_connect !== undefined) return _connect
+
   try {
     const mod: { connect?: ConnectFn } = await import('cloudflare:sockets')
-    _connect = mod.connect ?? null
+    if (mod.connect) {
+      _connect = mod.connect
+      return _connect
+    }
   } catch {
-    _connect = null
+    // 非 Workers 运行时，走下面的 Node 分支
   }
+
+  _connect = await createNodeConnect()
   return _connect
+}
+
+/** Node 运行时：用 node:tls 建一个和 cloudflare:sockets 同形状的 connect() */
+async function createNodeConnect(): Promise<ConnectFn | null> {
+  let tls: any
+  try {
+    const dynamicImport = new Function('s', 'return import(s)') as (s: string) => Promise<any>
+    tls = await dynamicImport('node:tls')
+  } catch {
+    return null
+  }
+  if (!tls?.connect) return null
+
+  const connect: ConnectFn = (addr, opts) => {
+    const sock = tls.connect({
+      host: addr.hostname,
+      port: addr.port,
+      servername: opts.secureTransport === 'on' ? addr.hostname : undefined,
+      ALPNProtocols: ['http/1.1'],
+    })
+    sock.setNoDelay?.(true)
+
+    const readable = new ReadableStream<Uint8Array>({
+      start(controller) {
+        sock.on('data', (c: Uint8Array) => controller.enqueue(new Uint8Array(c)))
+        sock.on('end', () => { try { controller.close() } catch { /* 已关闭 */ } })
+        sock.on('error', (e: Error) => { try { controller.error(e) } catch { /* 已关闭 */ } })
+      },
+      cancel() { sock.destroy() },
+    })
+
+    const writable = new WritableStream<Uint8Array>({
+      write(chunk) {
+        return new Promise((resolve, reject) => {
+          sock.write(chunk, (err?: Error | null) => (err ? reject(err) : resolve()))
+        })
+      },
+      close() { sock.end() },
+      abort() { sock.destroy() },
+    })
+
+    return { readable, writable, close: () => sock.destroy() }
+  }
+  return connect
 }
 
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array<ArrayBuffer> {
