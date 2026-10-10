@@ -8,7 +8,6 @@ export const SITE_CONFIG = {
   blogUrl: 'https://blog.notett.com',
   description: 'AI 渠道 API 代理网关 — 统一 /v1 接口转发',
   favicon: 'https://pan.811520.xyz/icon/ai.webp',
-  faCdn: 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css',
 }
 
 export const SESSION_TTL = 7 * 24 * 60 * 60

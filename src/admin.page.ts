@@ -2,12 +2,11 @@ import { Context } from 'hono'
 import { getProviders, getProxyKeys } from './storage'
 import { getCodexUpstreamRelay } from './codex'
 import { SITE_CONFIG, OPENCODE_DEFAULT_URL } from './config'
-import type { Env } from './types'
-import { CSS_CONTENT } from './pages.css'
-import { icon, SHARED_JS, renderSiteFooter } from './shared.js'
+import type { Env, Provider } from './types'
+import { ASSET_ADMIN_JS, ASSET_CSS, ASSET_SHARED_JS } from './assets'
+import { CLIENT_DYNAMIC_ICONS, icon, renderSiteFooter, withIconSprite } from './shared.js'
 import { storageTypeLabel } from './storage-adapter'
 import { AZURE_TTS_VOICES, voiceGroup } from './azure-voices'
-import { ADMIN_CLIENT_SCRIPT } from './admin.script'
 import { getTgConfig } from './backup'
 
 function getPlatformLabel(env: any, host?: string): string {
@@ -57,13 +56,173 @@ const H = (title: string) => `
   <meta name="theme-color" content="#f8fafc">
   <title>${title} — ${SITE_CONFIG.title}</title>
   <link rel="icon" href="${SITE_CONFIG.favicon}">
-  <link rel="stylesheet" href="${SITE_CONFIG.faCdn}">
-  <style>${CSS_CONTENT}</style>
+  <link rel="stylesheet" href="${ASSET_CSS}">
 </head>`
 
+/**
+ * 单个渠道的编辑面板（页面上默认折叠）。
+ *
+ * 这一块是整页里最大的一块：14 个渠道的完整表单（模型行 / Key 行 / 按钮 / 图标）
+ * 全量渲染出来有数百 KiB，而用户通常只会展开其中一两个。
+ * 因此改为按需渲染：列表页只输出摘要，首次展开时才向
+ * GET /admin/api/providers/:id/panel 取这一段 HTML。
+ */
+/** 轻量内容哈希，用作 ETag（只做缓存校验，不需要密码学强度） */
+function contentTag(input: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(36)
+}
+
+export function renderProviderPanel(p: Provider): string {
+  return `
+  <div class="detail-heading">
+    <div><h3>编辑 ${escapePageHtml(p.name)}</h3><p>修改配置后保存即刻生效于后续请求。</p></div>
+    <span class="protocol-chip">${(p.type || p.apiType || 'openai').toUpperCase()}</span>
+  </div>
+
+  <div class="fr">
+    <div class="fg"><label>渠道名称</label><input type="text" id="nm-${escapePageHtml(p.id)}" value="${escapePageHtml(p.name)}"></div>
+    <div class="fg"><label>渠道 ID</label><input type="text" id="pid-${escapePageHtml(p.id)}" value="${escapePageHtml(p.id)}"></div>
+  </div>
+  <div class="fg"><label>API 地址</label><input type="url" id="url-${escapePageHtml(p.id)}" value="${escapePageHtml(p.baseUrl)}" ${(p.type || 'openai') === 'azure-tts' ? 'disabled placeholder="Azure TTS 为内置服务，无需地址"' : ''}></div>
+  <div class="fr">
+    <div class="fg"><label>渠道类型</label>
+      <select id="pt-${escapePageHtml(p.id)}" class="select-sm" onchange="onTypeChange(this, '${escapePageHtml(p.id)}')">
+        <option value="openai" ${(p.type || 'openai') === 'openai' ? 'selected' : ''}>OpenAI 兼容</option>
+        <option value="anthropic" ${p.type === 'anthropic' ? 'selected' : ''}>Anthropic 兼容</option>
+        <option value="openai-video" ${p.type === 'openai-video' ? 'selected' : ''}>OpenAI 视频</option>
+        <option value="agnes-video" ${p.type === 'agnes-video' ? 'selected' : ''}>Agnes 异步视频</option>
+        <option value="azure-tts" ${p.type === 'azure-tts' ? 'selected' : ''}>Azure TTS 语音</option>
+        <option value="antigravity" ${p.type === 'antigravity' ? 'selected' : ''}>Antigravity 反代</option>
+        <option value="claude" ${p.type === 'claude' ? 'selected' : ''}>Claude OAuth 反代</option>
+        <option value="codex" ${p.type === 'codex' ? 'selected' : ''}>ChatGPT (Codex) 反代</option>
+        <option value="kimi" ${p.type === 'kimi' ? 'selected' : ''}>Kimi Coding OAuth 反代</option>
+        <option value="kimiweb" ${p.type === 'kimiweb' ? 'selected' : ''}>Kimi 网页版反代 (kimi.ai)</option>
+        <option value="geminiweb" ${p.type === 'geminiweb' ? 'selected' : ''}>Gemini 网页版反代 (Cookie)</option>
+        <option value="minimaxweb" ${p.type === 'minimaxweb' ? 'selected' : ''}>MiniMax 网页版反代 (Token)</option>
+        <option value="lingxi" ${p.type === 'lingxi' ? 'selected' : ''}>中国移动灵犀反代 (Cookie)</option>
+        <option value="grok" ${p.type === 'grok' ? 'selected' : ''}>Grok OAuth 反代</option>
+        <option value="qwen" ${p.type === 'qwen' ? 'selected' : ''}>Qwen OAuth 反代</option>
+        <option value="deepseek" ${p.type === 'deepseek' ? 'selected' : ''}>DeepSeek 反代</option>
+        <option value="vertex" ${p.type === 'vertex' ? 'selected' : ''}>Vertex AI 反代</option>
+        <option value="devin" ${p.type === 'devin' ? 'selected' : ''}>Devin 反代</option>
+        <option value="zai" ${p.type === 'zai' ? 'selected' : ''}>Z.AI (GLM 国际)</option>
+        <option value="codebuddy" ${p.type === 'codebuddy' ? 'selected' : ''}>CodeBuddy (腾讯) 反代</option>
+        <option value="cline" ${p.type === 'cline' ? 'selected' : ''}>Cline 反代</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Antigravity 配置 -->
+  <div class="ag-config" id="ag-${escapePageHtml(p.id)}" ${p.type === 'antigravity' ? '' : 'style="display:none"'}>
+    <div class="fg"><label>Google 账号授权</label>
+      <div class="fc" style="gap:8px">
+        <button class="btn btn-s" type="button" onclick="antigravityOAuth('${escapePageHtml(p.id)}')">${icon('key', '', 14)} 用 Google 账号授权</button>
+        <button class="btn btn-s" type="button" onclick="fetchAgModels('${escapePageHtml(p.id)}')">${icon('download', '', 14)} 获取可用模型</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DeepSeek 配置 -->
+  <div class="ag-config" id="ds-${escapePageHtml(p.id)}" ${p.type === 'deepseek' ? '' : 'style="display:none"'}>
+    <div class="fg"><label>DeepSeek 凭据托管</label>
+      <div class="fc field-row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn btn-p btn-s" type="button" onclick="openDeepseekTokenDialog('${escapePageHtml(p.id)}')">${icon('key', '', 14)} 粘贴 userToken</button>
+        <button class="btn btn-s" type="button" onclick="openDeepseekAccountDialog('${escapePageHtml(p.id)}')">${icon('shield', '', 14)} 账号代登录</button>
+        <button class="btn btn-s" type="button" onclick="verifyDeepseek('${escapePageHtml(p.id)}')">${icon('plug', '', 14)} 验证已填凭据</button>
+      </div>
+      <script type="application/json" id="dsacc-${escapePageHtml(p.id)}">${JSON.stringify(p.dsAccount || {}).replace(/</g, '\\u003c')}</script>
+    </div>
+  </div>
+
+  <!-- OAuth 反代配置 -->
+  <div class="ag-config" id="oa-${escapePageHtml(p.id)}" ${['claude', 'codex', 'kimi', 'grok', 'qwen', 'codebuddy', 'cline'].includes(p.type || '') ? '' : 'style="display:none"'}>
+    <div class="fg"><label>OAuth 登录与模型获取</label>
+      <div class="fc" style="gap:8px">
+        <button class="btn btn-s" type="button" onclick="oauthChannel('${escapePageHtml(p.id)}')">${icon('key', '', 14)} 授权登录获取 refresh_token</button>
+        <button class="btn btn-s" type="button" onclick="fetchOAuthModels('${escapePageHtml(p.id)}')">${icon('download', '', 14)} 获取模型列表</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CodeBuddy 配置 -->
+  <div class="cb-config" id="cb-${escapePageHtml(p.id)}" ${p.type === 'codebuddy' ? '' : 'style="display:none"'}>
+    <div class="fg"><label for="cbr-${escapePageHtml(p.id)}">版本 / 区域</label>
+      <select id="cbr-${escapePageHtml(p.id)}" class="select-sm" onchange="cbRegionChange('${escapePageHtml(p.id)}')">
+        <option value="cn" ${cbRealmOf(p) === 'cn' ? 'selected' : ''}>国内版 · copilot.tencent.com</option>
+        <option value="global" ${cbRealmOf(p) === 'global' ? 'selected' : ''}>国际版 · workbuddy.ai</option>
+      </select>
+    </div>
+    <div class="fg"><label>账号积分与签到</label>
+      <div class="fc" style="gap:8px">
+        <button class="btn btn-s" type="button" onclick="codebuddyStatus('${escapePageHtml(p.id)}')">${icon('coins', '', 14)} 查询积分/套餐</button>
+        <button class="btn btn-s" type="button" onclick="codebuddyCheckin('${escapePageHtml(p.id)}')">${icon('calendar', '', 14)} 每日签到</button>
+      </div>
+    </div>
+    <div class="mt-1" id="cbst-${escapePageHtml(p.id)}" aria-live="polite"></div>
+  </div>
+
+  <!-- Azure TTS 配置 -->
+  <div class="tts-config" id="tts-${escapePageHtml(p.id)}" ${(p.type || 'openai') === 'azure-tts' ? '' : 'style="display:none"'}>
+    <fieldset class="form-group"><legend>Azure TTS 音色参数</legend>
+      <div class="fr">
+        <div class="fg"><label>音色 Voice</label>
+          <div class="fc" style="gap:8px">
+            <select id="pv-${escapePageHtml(p.id)}" class="select-sm"><option value="">自定义…</option>${azureVoiceOptions(p.voice || 'zh-CN-XiaoxiaoNeural')}</select>
+            <button class="btn btn-s" type="button" onclick="previewTts('${escapePageHtml(p.id)}')">${icon('play', '', 14)} 试听</button>
+          </div>
+        </div>
+        <div class="fg"><label>语速 Rate</label><input type="text" id="pr-${escapePageHtml(p.id)}" value="${escapePageHtml(p.rate || '+0%')}"></div>
+      </div>
+      <div class="fr">
+        <div class="fg"><label>音量 Volume</label><input type="text" id="pvol-${escapePageHtml(p.id)}" value="${escapePageHtml(p.volume || '+0%')}"></div>
+        <div class="fg"><label>音调 Pitch</label><input type="text" id="pp-${escapePageHtml(p.id)}" value="${escapePageHtml(p.pitch || '+0Hz')}"></div>
+      </div>
+      <div id="ttp-${escapePageHtml(p.id)}"></div>
+      <div class="fc" style="gap:8px;margin-top:8px">
+        <button class="btn btn-s" type="button" onclick="addTtsModel('${escapePageHtml(p.id)}')">${icon('plus', '', 14)} 添加当前音色为模型</button>
+        <button class="btn btn-s" type="button" onclick="addAllTtsModels('${escapePageHtml(p.id)}')">${icon('microphone', '', 14)} 添加全部音色</button>
+      </div>
+    </fieldset>
+  </div>
+
+  <!-- 镜像地址 -->
+  <div class="fg" data-hide-ag ${p.type === 'antigravity' ? 'style="display:none"' : ''}><label>镜像备用地址</label><textarea id="mir-${escapePageHtml(p.id)}" rows="2">${(p.mirrorUrls || []).map(escapePageHtml).join('\\n')}</textarea></div>
+
+  <!-- 上游 API Keys 列表(超量分页, 「查看更多」按需加载, 编辑走增量接口) -->
+  <fieldset class="form-group"><legend>上游 API Keys<span style="font-weight:400;color:#888"> (共 ${(p.apiKeys || []).length} 个)</span></legend>
+    <div id="keys-${escapePageHtml(p.id)}" data-shown="${(p.apiKeys || []).length > 10 ? 10 : (p.apiKeys || []).length}">${(p.apiKeys || []).slice(0, 10).map((k, ki) => `<div class="fc mb-3 field-row" data-kidx="${ki}"><input type="text" value="${escapePageHtml(k.key)}" class="fx1" id="k-${escapePageHtml(p.id)}-${ki}"><label class="tg"><input type="checkbox" ${k.enabled ? 'checked' : ''} id="ken-${escapePageHtml(p.id)}-${ki}" onchange="keyToggle(this)"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)">${icon('copy', '', 14)}</button><button class="icon-btn" onclick="testKeyRow(this)">${icon('plug', '', 14)}</button><button class="icon-btn" onclick="rmKeyRow(this)">${icon('times', '', 14)}</button></div>`).join('')}</div>
+    ${(p.apiKeys || []).length > 10 ? `<div class="fc mb-3 field-row" id="kmore-${escapePageHtml(p.id)}"><button class="btn btn-s" onclick="loadMoreKeys(this)">查看更多(已显示 10 / 共 ${(p.apiKeys || []).length})</button></div>` : ''}
+    <div class="fc mt-1 field-row"><input type="text" id="nk-${escapePageHtml(p.id)}" placeholder="添加新的 API Key" class="fx1"><button class="btn btn-s" onclick="addKeyRow('${escapePageHtml(p.id)}')">${icon('plus', '', 14)}添加</button></div>
+  </fieldset>
+
+  <!-- 模型列表 -->
+  <fieldset class="form-group"><legend>模型配置</legend>
+    <div id="ml-${escapePageHtml(p.id)}">${p.models.map((m, mi) => `<div class="fc mb-3 field-row" data-idx="${mi}"><input type="text" value="${escapePageHtml(m.id)}" class="fx1" id="mid-${escapePageHtml(p.id)}-${mi}"><input type="text" value="${escapePageHtml(m.alias || '')}" class="fx1" id="mal-${escapePageHtml(p.id)}-${mi}" placeholder="对外别名(可选)"><label class="tg"><input type="checkbox" ${m.enabled ? 'checked' : ''} id="men-${escapePageHtml(p.id)}-${mi}"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)">${icon('copy', '', 14)}</button><button class="icon-btn" onclick="testMdl('${p.id}','${m.id}',${mi})">${icon('plug', '', 14)}</button><button class="icon-btn" onclick="rmMdl('${p.id}',${mi})">${icon('times', '', 14)}</button></div>`).join('')}</div>
+    <div class="fc mt-1 field-row"><input type="text" id="nmid-${escapePageHtml(p.id)}" placeholder="模型 ID" class="fx1"><input type="text" id="nmal-${escapePageHtml(p.id)}" placeholder="对外别名(可选)" class="fx1"><button class="btn btn-s" onclick="addMdl('${p.id}')">${icon('plus', '', 14)}添加</button></div>
+  </fieldset>
+
+  <div class="detail-actions">
+    <div id="tr-${escapePageHtml(p.id)}" aria-live="polite"></div>
+    <div>
+      <button class="btn btn-s" data-hide-ag ${p.type === 'antigravity' ? 'style="display:none"' : ''} onclick="fetchEditModels('${p.id}', false)">${icon('download', '', 14)} 获取模型</button>
+      <button class="btn btn-s" data-hide-ag ${p.type === 'antigravity' ? 'style="display:none"' : ''} onclick="fetchEditModels('${p.id}', true)">${icon('gift', '', 14)} 获取免费模型</button>
+      <button class="btn btn-d" onclick="del('${p.id}')">${icon('trash', '', 14)} 删除渠道</button>
+      <button class="btn btn-p" onclick="save('${p.id}')">${icon('save', '', 14)} 保存更改</button>
+    </div>
+  </div>
+`
+}
+
 export async function renderAdminPage(c: Context<{ Bindings: Env }>) {
-  // 后台页面禁缓存: 防止浏览器/CDN 提供旧版大页面导致交互卡死
-  c.header('Cache-Control', 'no-store, no-cache, must-revalidate')
+  // 允许浏览器缓存但必须回源校验：配合下面的 ETag，内容未变时整页 304，重复访问零重传。
+  // 注意：Hono 中 c.header() 设置的头部优先级高于 handler 返回的 Response 自身头部，
+  // 因此缓存策略必须在这里设置（在 routes/pages.ts 里改 res.headers 是无效的）。
+  c.header('Cache-Control', 'private, no-cache, must-revalidate')
   c.header('Pragma', 'no-cache')
   const providers = await getProviders(c.env)
   const proxyKeys = await getProxyKeys(c.env)
@@ -87,7 +246,7 @@ export async function renderAdminPage(c: Context<{ Bindings: Env }>) {
   const host = c.req.header('host') || ''
   const apiBase = `https://${host}/v1`
 
-  return c.html(`<!DOCTYPE html><html lang="zh-CN">
+  const page = `<!DOCTYPE html><html lang="zh-CN">
 ${H('控制台')}
 <body class="site-page admin-page">
 <div class="admin-shell">
@@ -387,144 +546,7 @@ ${H('控制台')}
               </div>
             </div>
 
-            <div class="pd" id="dt-${escapePageHtml(p.id)}">
-              <div class="detail-heading">
-                <div><h3>编辑 ${escapePageHtml(p.name)}</h3><p>修改配置后保存即刻生效于后续请求。</p></div>
-                <span class="protocol-chip">${(p.type || p.apiType || 'openai').toUpperCase()}</span>
-              </div>
-
-              <div class="fr">
-                <div class="fg"><label>渠道名称</label><input type="text" id="nm-${escapePageHtml(p.id)}" value="${escapePageHtml(p.name)}"></div>
-                <div class="fg"><label>渠道 ID</label><input type="text" id="pid-${escapePageHtml(p.id)}" value="${escapePageHtml(p.id)}"></div>
-              </div>
-              <div class="fg"><label>API 地址</label><input type="url" id="url-${escapePageHtml(p.id)}" value="${escapePageHtml(p.baseUrl)}" ${(p.type || 'openai') === 'azure-tts' ? 'disabled placeholder="Azure TTS 为内置服务，无需地址"' : ''}></div>
-              <div class="fr">
-                <div class="fg"><label>渠道类型</label>
-                  <select id="pt-${escapePageHtml(p.id)}" class="select-sm" onchange="onTypeChange(this, '${escapePageHtml(p.id)}')">
-                    <option value="openai" ${(p.type || 'openai') === 'openai' ? 'selected' : ''}>OpenAI 兼容</option>
-                    <option value="anthropic" ${p.type === 'anthropic' ? 'selected' : ''}>Anthropic 兼容</option>
-                    <option value="openai-video" ${p.type === 'openai-video' ? 'selected' : ''}>OpenAI 视频</option>
-                    <option value="agnes-video" ${p.type === 'agnes-video' ? 'selected' : ''}>Agnes 异步视频</option>
-                    <option value="azure-tts" ${p.type === 'azure-tts' ? 'selected' : ''}>Azure TTS 语音</option>
-                    <option value="antigravity" ${p.type === 'antigravity' ? 'selected' : ''}>Antigravity 反代</option>
-                    <option value="claude" ${p.type === 'claude' ? 'selected' : ''}>Claude OAuth 反代</option>
-                    <option value="codex" ${p.type === 'codex' ? 'selected' : ''}>ChatGPT (Codex) 反代</option>
-                    <option value="kimi" ${p.type === 'kimi' ? 'selected' : ''}>Kimi Coding OAuth 反代</option>
-                    <option value="kimiweb" ${p.type === 'kimiweb' ? 'selected' : ''}>Kimi 网页版反代 (kimi.ai)</option>
-                    <option value="geminiweb" ${p.type === 'geminiweb' ? 'selected' : ''}>Gemini 网页版反代 (Cookie)</option>
-                    <option value="minimaxweb" ${p.type === 'minimaxweb' ? 'selected' : ''}>MiniMax 网页版反代 (Token)</option>
-                    <option value="lingxi" ${p.type === 'lingxi' ? 'selected' : ''}>中国移动灵犀反代 (Cookie)</option>
-                    <option value="grok" ${p.type === 'grok' ? 'selected' : ''}>Grok OAuth 反代</option>
-                    <option value="qwen" ${p.type === 'qwen' ? 'selected' : ''}>Qwen OAuth 反代</option>
-                    <option value="deepseek" ${p.type === 'deepseek' ? 'selected' : ''}>DeepSeek 反代</option>
-                    <option value="vertex" ${p.type === 'vertex' ? 'selected' : ''}>Vertex AI 反代</option>
-                    <option value="devin" ${p.type === 'devin' ? 'selected' : ''}>Devin 反代</option>
-                    <option value="zai" ${p.type === 'zai' ? 'selected' : ''}>Z.AI (GLM 国际)</option>
-                    <option value="codebuddy" ${p.type === 'codebuddy' ? 'selected' : ''}>CodeBuddy (腾讯) 反代</option>
-                    <option value="cline" ${p.type === 'cline' ? 'selected' : ''}>Cline 反代</option>
-                  </select>
-                </div>
-              </div>
-
-              <!-- Antigravity 配置 -->
-              <div class="ag-config" id="ag-${escapePageHtml(p.id)}" ${p.type === 'antigravity' ? '' : 'style="display:none"'}>
-                <div class="fg"><label>Google 账号授权</label>
-                  <div class="fc" style="gap:8px">
-                    <button class="btn btn-s" type="button" onclick="antigravityOAuth('${escapePageHtml(p.id)}')">${icon('key', '', 14)} 用 Google 账号授权</button>
-                    <button class="btn btn-s" type="button" onclick="fetchAgModels('${escapePageHtml(p.id)}')">${icon('download', '', 14)} 获取可用模型</button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- DeepSeek 配置 -->
-              <div class="ag-config" id="ds-${escapePageHtml(p.id)}" ${p.type === 'deepseek' ? '' : 'style="display:none"'}>
-                <div class="fg"><label>DeepSeek 凭据托管</label>
-                  <div class="fc field-row" style="gap:8px;flex-wrap:wrap">
-                    <button class="btn btn-p btn-s" type="button" onclick="openDeepseekTokenDialog('${escapePageHtml(p.id)}')">${icon('key', '', 14)} 粘贴 userToken</button>
-                    <button class="btn btn-s" type="button" onclick="openDeepseekAccountDialog('${escapePageHtml(p.id)}')">${icon('shield', '', 14)} 账号代登录</button>
-                    <button class="btn btn-s" type="button" onclick="verifyDeepseek('${escapePageHtml(p.id)}')">${icon('plug', '', 14)} 验证已填凭据</button>
-                  </div>
-                  <script type="application/json" id="dsacc-${escapePageHtml(p.id)}">${JSON.stringify(p.dsAccount || {}).replace(/</g, '\\u003c')}</script>
-                </div>
-              </div>
-
-              <!-- OAuth 反代配置 -->
-              <div class="ag-config" id="oa-${escapePageHtml(p.id)}" ${['claude', 'codex', 'kimi', 'grok', 'qwen', 'codebuddy', 'cline'].includes(p.type || '') ? '' : 'style="display:none"'}>
-                <div class="fg"><label>OAuth 登录与模型获取</label>
-                  <div class="fc" style="gap:8px">
-                    <button class="btn btn-s" type="button" onclick="oauthChannel('${escapePageHtml(p.id)}')">${icon('key', '', 14)} 授权登录获取 refresh_token</button>
-                    <button class="btn btn-s" type="button" onclick="fetchOAuthModels('${escapePageHtml(p.id)}')">${icon('download', '', 14)} 获取模型列表</button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- CodeBuddy 配置 -->
-              <div class="cb-config" id="cb-${escapePageHtml(p.id)}" ${p.type === 'codebuddy' ? '' : 'style="display:none"'}>
-                <div class="fg"><label for="cbr-${escapePageHtml(p.id)}">版本 / 区域</label>
-                  <select id="cbr-${escapePageHtml(p.id)}" class="select-sm" onchange="cbRegionChange('${escapePageHtml(p.id)}')">
-                    <option value="cn" ${cbRealmOf(p) === 'cn' ? 'selected' : ''}>国内版 · copilot.tencent.com</option>
-                    <option value="global" ${cbRealmOf(p) === 'global' ? 'selected' : ''}>国际版 · workbuddy.ai</option>
-                  </select>
-                </div>
-                <div class="fg"><label>账号积分与签到</label>
-                  <div class="fc" style="gap:8px">
-                    <button class="btn btn-s" type="button" onclick="codebuddyStatus('${escapePageHtml(p.id)}')">${icon('coins', '', 14)} 查询积分/套餐</button>
-                    <button class="btn btn-s" type="button" onclick="codebuddyCheckin('${escapePageHtml(p.id)}')">${icon('calendar', '', 14)} 每日签到</button>
-                  </div>
-                </div>
-                <div class="mt-1" id="cbst-${escapePageHtml(p.id)}" aria-live="polite"></div>
-              </div>
-
-              <!-- Azure TTS 配置 -->
-              <div class="tts-config" id="tts-${escapePageHtml(p.id)}" ${(p.type || 'openai') === 'azure-tts' ? '' : 'style="display:none"'}>
-                <fieldset class="form-group"><legend>Azure TTS 音色参数</legend>
-                  <div class="fr">
-                    <div class="fg"><label>音色 Voice</label>
-                      <div class="fc" style="gap:8px">
-                        <select id="pv-${escapePageHtml(p.id)}" class="select-sm"><option value="">自定义…</option>${azureVoiceOptions(p.voice || 'zh-CN-XiaoxiaoNeural')}</select>
-                        <button class="btn btn-s" type="button" onclick="previewTts('${escapePageHtml(p.id)}')">${icon('play', '', 14)} 试听</button>
-                      </div>
-                    </div>
-                    <div class="fg"><label>语速 Rate</label><input type="text" id="pr-${escapePageHtml(p.id)}" value="${escapePageHtml(p.rate || '+0%')}"></div>
-                  </div>
-                  <div class="fr">
-                    <div class="fg"><label>音量 Volume</label><input type="text" id="pvol-${escapePageHtml(p.id)}" value="${escapePageHtml(p.volume || '+0%')}"></div>
-                    <div class="fg"><label>音调 Pitch</label><input type="text" id="pp-${escapePageHtml(p.id)}" value="${escapePageHtml(p.pitch || '+0Hz')}"></div>
-                  </div>
-                  <div id="ttp-${escapePageHtml(p.id)}"></div>
-                  <div class="fc" style="gap:8px;margin-top:8px">
-                    <button class="btn btn-s" type="button" onclick="addTtsModel('${escapePageHtml(p.id)}')">${icon('plus', '', 14)} 添加当前音色为模型</button>
-                    <button class="btn btn-s" type="button" onclick="addAllTtsModels('${escapePageHtml(p.id)}')">${icon('microphone', '', 14)} 添加全部音色</button>
-                  </div>
-                </fieldset>
-              </div>
-
-              <!-- 镜像地址 -->
-              <div class="fg" data-hide-ag ${p.type === 'antigravity' ? 'style="display:none"' : ''}><label>镜像备用地址</label><textarea id="mir-${escapePageHtml(p.id)}" rows="2">${(p.mirrorUrls || []).map(escapePageHtml).join('\\n')}</textarea></div>
-
-              <!-- 上游 API Keys 列表(超量分页, 「查看更多」按需加载, 编辑走增量接口) -->
-              <fieldset class="form-group"><legend>上游 API Keys<span style="font-weight:400;color:#888"> (共 ${(p.apiKeys || []).length} 个)</span></legend>
-                <div id="keys-${escapePageHtml(p.id)}" data-shown="${(p.apiKeys || []).length > 10 ? 10 : (p.apiKeys || []).length}">${(p.apiKeys || []).slice(0, 10).map((k, ki) => `<div class="fc mb-3 field-row" data-kidx="${ki}"><input type="text" value="${escapePageHtml(k.key)}" class="fx1" id="k-${escapePageHtml(p.id)}-${ki}"><label class="tg"><input type="checkbox" ${k.enabled ? 'checked' : ''} id="ken-${escapePageHtml(p.id)}-${ki}" onchange="keyToggle(this)"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)">${icon('copy', '', 14)}</button><button class="icon-btn" onclick="testKeyRow(this)">${icon('plug', '', 14)}</button><button class="icon-btn" onclick="rmKeyRow(this)">${icon('times', '', 14)}</button></div>`).join('')}</div>
-                ${(p.apiKeys || []).length > 10 ? `<div class="fc mb-3 field-row" id="kmore-${escapePageHtml(p.id)}"><button class="btn btn-s" onclick="loadMoreKeys(this)">查看更多(已显示 10 / 共 ${(p.apiKeys || []).length})</button></div>` : ''}
-                <div class="fc mt-1 field-row"><input type="text" id="nk-${escapePageHtml(p.id)}" placeholder="添加新的 API Key" class="fx1"><button class="btn btn-s" onclick="addKeyRow('${escapePageHtml(p.id)}')">${icon('plus', '', 14)}添加</button></div>
-              </fieldset>
-
-              <!-- 模型列表 -->
-              <fieldset class="form-group"><legend>模型配置</legend>
-                <div id="ml-${escapePageHtml(p.id)}">${p.models.map((m, mi) => `<div class="fc mb-3 field-row" data-idx="${mi}"><input type="text" value="${escapePageHtml(m.id)}" class="fx1" id="mid-${escapePageHtml(p.id)}-${mi}"><input type="text" value="${escapePageHtml(m.alias || '')}" class="fx1" id="mal-${escapePageHtml(p.id)}-${mi}" placeholder="对外别名(可选)"><label class="tg"><input type="checkbox" ${m.enabled ? 'checked' : ''} id="men-${escapePageHtml(p.id)}-${mi}"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)">${icon('copy', '', 14)}</button><button class="icon-btn" onclick="testMdl('${p.id}','${m.id}',${mi})">${icon('plug', '', 14)}</button><button class="icon-btn" onclick="rmMdl('${p.id}',${mi})">${icon('times', '', 14)}</button></div>`).join('')}</div>
-                <div class="fc mt-1 field-row"><input type="text" id="nmid-${escapePageHtml(p.id)}" placeholder="模型 ID" class="fx1"><input type="text" id="nmal-${escapePageHtml(p.id)}" placeholder="对外别名(可选)" class="fx1"><button class="btn btn-s" onclick="addMdl('${p.id}')">${icon('plus', '', 14)}添加</button></div>
-              </fieldset>
-
-              <div class="detail-actions">
-                <div id="tr-${escapePageHtml(p.id)}" aria-live="polite"></div>
-                <div>
-                  <button class="btn btn-s" data-hide-ag ${p.type === 'antigravity' ? 'style="display:none"' : ''} onclick="fetchEditModels('${p.id}', false)">${icon('download', '', 14)} 获取模型</button>
-                  <button class="btn btn-s" data-hide-ag ${p.type === 'antigravity' ? 'style="display:none"' : ''} onclick="fetchEditModels('${p.id}', true)">${icon('gift', '', 14)} 获取免费模型</button>
-                  <button class="btn btn-d" onclick="del('${p.id}')">${icon('trash', '', 14)} 删除渠道</button>
-                  <button class="btn btn-p" onclick="save('${p.id}')">${icon('save', '', 14)} 保存更改</button>
-                </div>
-              </div>
-            </div>
+            <div class="pd" id="dt-${escapePageHtml(p.id)}" data-lazy="1"></div>
           </article>`).join('') : `<div class="empty-state">${icon('server', '', 36)}<h3>暂未配置上游渠道</h3><p>添加第一个渠道，开启统一大模型路由。</p><button class="btn btn-p" onclick="showAdd()" style="margin-top:12px">添加渠道</button></div>`}
         </div>
       </section>
@@ -659,10 +681,20 @@ ${H('控制台')}
 
 <div id="modal" class="modal-o hd" role="presentation" onclick="if(event.target===this)closeM()"><div class="modal" id="mc" role="dialog" aria-modal="true" aria-live="polite"></div></div>
 
-<script>${SHARED_JS}
-let AG_CHANNELS = ${JSON.stringify(agChannels).replace(/</g, '\\u003c')}
-const AZURE_VOICE_IDS = ${JSON.stringify(AZURE_TTS_VOICES.map((v) => v.id))}
-${ADMIN_CLIENT_SCRIPT}
-</script>
-</body></html>`)
+<!-- 页面级数据（服务端注入，必须内联） -->
+<script>var AG_CHANNELS = ${JSON.stringify(agChannels).replace(/</g, '\\u003c')}
+var AZURE_VOICE_IDS = ${JSON.stringify(AZURE_TTS_VOICES.map((v) => v.id))}</script>
+<!-- 客户端脚本外链：可缓存、可压缩，不再随每次页面请求重传 -->
+<script src="${ASSET_SHARED_JS}"></script>
+<script src="${ASSET_ADMIN_JS}"></script>
+</body></html>`
+  const html = withIconSprite(page, CLIENT_DYNAMIC_ICONS)
+  // 整页体积大，加 ETag：内容未变时返回 304，重复访问不再重传整页
+  const etag = '"' + contentTag(html) + '"'
+  // 走 c.header()：与 Cache-Control 同理，这样才不会被 preparedHeaders 覆盖
+  c.header('ETag', etag)
+  if (c.req.header('if-none-match') === etag) {
+    return c.body(null, 304)
+  }
+  return c.html(html)
 }

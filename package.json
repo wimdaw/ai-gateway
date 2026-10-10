@@ -6,11 +6,12 @@
     "hono": "^4.12.27"
   },
   "scripts": {
-    "build": "npm run build:pages",
-    "dev": "npm run build:pages && wrangler pages dev dist",
-    "preview": "npm run build:pages && wrangler pages dev dist",
-    "build:pages": "mkdir -p dist && cp -f index.html dist/index.html && echo \"{\\\"version\\\": 1, \\\"include\\\": [\\\"/*\\\"], \\\"exclude\\\": []}\" > dist/_routes.json && esbuild src/index.ts --bundle --format=esm --platform=neutral --target=es2022 --outfile=dist/_worker.js",
-    "deploy:pages": "npm run build:pages && wrangler pages deploy dist --project-name ai-gateway"
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs && wrangler pages dev dist",
+    "preview": "node scripts/build.mjs && wrangler pages dev dist",
+    "typecheck": "tsc --noEmit",
+    "build:pages": "node scripts/build.mjs",
+    "deploy:pages": "node scripts/build.mjs && wrangler pages deploy dist --project-name ai-gateway"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260702.1",

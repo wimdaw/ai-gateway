@@ -4,14 +4,25 @@ import { getKV, addUsageRecordD1 } from './storage-adapter'
 
 // ===== 提供商 CRUD =====
 
-// 进程内缓存: providers 可达 MB 级(万级 Key), 每次请求都远端读取+解析代价过高
+// 进程内缓存: providers 可达 MB 级(万级 Key), 每次请求都远端读取+解析代价过高。
+// 但缓存必须带过期时间: 该变量是 isolate 级的, 管理端在 A isolate 改完渠道后,
+// B isolate 会一直沿用旧列表 —— 实测在部署切换期出现过「刚创建的渠道在另一个
+// isolate 上查不到 / 删除返回 404」。30s TTL 把不一致窗口收敛到可接受范围,
+// 同时每个 isolate 最多每 30s 读一次存储, 开销可忽略。
+const PROVIDERS_CACHE_TTL_MS = 30_000
+
 let providersCache: Provider[] | null = null
+let providersCacheAt = 0
 
 export async function getProviders(env: Env): Promise<Provider[]> {
-  if (providersCache) return providersCache
+  const now = Date.now()
+  if (providersCache && now - providersCacheAt < PROVIDERS_CACHE_TTL_MS) return providersCache
   const data = await getKV(env).get(KV_KEYS.PROVIDERS)
-  providersCache = data ? JSON.parse(data) : []
-  return providersCache
+  // 显式标注局部类型：JSON.parse 返回 any，直接赋值会把上面的缓存变量重新放宽成 Provider[] | null
+  const parsed: Provider[] = data ? (JSON.parse(data) as Provider[]) : []
+  providersCache = parsed
+  providersCacheAt = now
+  return parsed
 }
 
 export async function getProvider(env: Env, id: string): Promise<Provider | null> {
@@ -21,17 +32,34 @@ export async function getProvider(env: Env, id: string): Promise<Provider | null
 
 export async function setProviders(env: Env, providers: Provider[]): Promise<void> {
   providersCache = providers
+  providersCacheAt = Date.now()
   await getKV(env).put(KV_KEYS.PROVIDERS, JSON.stringify(providers))
 }
 
+/**
+ * 供「读-改-写」使用的强制新鲜读取：必须绕过 isolate 缓存。
+ *
+ * 所有渠道写操作都是「读全量 → 改 → 写回」。若读的是 isolate 缓存，
+ * 而这份缓存在别的 isolate 刚写完、尚未过期，写回就会把对方的改动**整条覆盖掉**。
+ * 实测：A isolate 新建渠道后，B isolate 的删除操作按旧列表写回，新渠道一度被冲掉。
+ * 因此写路径一律读最新值；读路径仍走缓存，热路径性能不受影响。
+ */
+async function readProvidersFresh(env: Env): Promise<Provider[]> {
+  const data = await getKV(env).get(KV_KEYS.PROVIDERS)
+  const parsed: Provider[] = data ? (JSON.parse(data) as Provider[]) : []
+  providersCache = parsed
+  providersCacheAt = Date.now()
+  return parsed
+}
+
 export async function addProvider(env: Env, provider: Provider): Promise<void> {
-  const providers = await getProviders(env)
+  const providers = await readProvidersFresh(env)
   providers.push(provider)
   await setProviders(env, providers)
 }
 
 export async function updateProvider(env: Env, id: string, updates: Partial<Provider>): Promise<Provider | null> {
-  const providers = await getProviders(env)
+  const providers = await readProvidersFresh(env)
   const index = providers.findIndex((p) => p.id === id)
   if (index === -1) return null
   providers[index] = { ...providers[index], ...updates, updatedAt: new Date().toISOString() }
@@ -40,7 +68,7 @@ export async function updateProvider(env: Env, id: string, updates: Partial<Prov
 }
 
 export async function deleteProvider(env: Env, id: string): Promise<boolean> {
-  const providers = await getProviders(env)
+  const providers = await readProvidersFresh(env)
   const filtered = providers.filter((p) => p.id !== id)
   if (filtered.length === providers.length) return false
   await setProviders(env, filtered)
