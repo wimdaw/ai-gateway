@@ -7,6 +7,7 @@ import type { Context, Hono } from 'hono'
 import type { Env } from '../types'
 import { handleProxy, handleModels } from '../proxy'
 import { proxyKeyAuthMiddleware } from '../auth'
+import { withSseKeepAlive } from '../sse-keepalive'
 
 /**
  * 未实现端点（files / fine-tuning / assistants / threads 等）。
@@ -47,6 +48,17 @@ const notImplemented = (c: Context) => c.json({
 
 export function registerProxyRoutes(app: Hono<{ Bindings: Env }>) {
   app.use('/v1/*', proxyKeyAuthMiddleware)
+
+// SSE 响应统一加 keep-alive：静默期间注入 `: ping` 注释帧，防客户端与网关之间的
+// NAT/中间代理把长时间无数据的连接判死。仅处理 text/event-stream，其它响应原样放行。
+app.use('/v1/*', async (c, next) => {
+  await next()
+  const res = c.res
+  const contentType = res.headers.get('content-type') || ''
+  if (contentType.includes('text/event-stream') && res.body) {
+    c.res = withSseKeepAlive(res)
+  }
+})
   app.get('/v1/models', handleModels)
 
   // OpenAI 兼容代理端点（全部透传转发，参考 one-api-cf 端点清单）
