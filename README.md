@@ -46,6 +46,10 @@ pages_build_output_dir = "dist"
 compatibility_date = "2025-07-01"
 compatibility_flags = ["nodejs_compat"]
 
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "ai-gateway-db"
@@ -117,6 +121,14 @@ npm run deploy:pages  # 打包前端及 Worker 逻辑，并部署至 Cloudflare 
 | OpenCode | OpenAI 兼容 | 免费模型，无需 API Key，含 3 个镜像地址故障转移 |
 | Kilo | OpenAI 兼容 | 免费模型 + 前沿模型，无需 API Key |
 | Azure TTS | 语音合成 | 内置 Azure 语音，无需 API 地址 |
+
+## Duck.ai AI Chat（`duckai` 渠道）
+
+Duck.ai 提供免上游 API Key 的 AI 聊天。后台添加渠道时选择 **Duck.ai AI Chat (免 Key)**，用「获取模型」读取当前免费模型并加入配置；默认模型为 `gpt-5.4-mini`。网关通过 `/v1/chat/completions` 提供 OpenAI 兼容接口。
+
+Duck.ai 会在聊天前下发动态 JavaScript 挑战。本项目用 QuickJS WebAssembly 在隔离环境中处理挑战，并限制其内存、栈与执行时间。请保留 `wrangler.toml` 中的 `CompiledWasm` 规则；构建脚本会将 QuickJS 模块作为 Worker 的 WebAssembly 模块一起打包。
+
+Cloudflare Workers/Pages 免费计划每次请求的 CPU 时间上限为 10 ms；挑战求解所需 CPU 会随上游脚本变化，可能超过该上限。若出现 CPU 超限错误，需要在 Cloudflare 控制台查看实际用量，并使用支持更高 CPU 限额的计划与配置。[Cloudflare CPU 限额说明](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)
 
 ## Antigravity 免费额度反代（`antigravity` 渠道）
 
@@ -560,6 +572,8 @@ src/
 ├── backup.ts         # 备份/恢复模块
 ├── azure-tts.ts      # Azure TTS 适配
 ├── azure-voices.ts   # Azure 音色列表
+├── duckai.ts         # Duck.ai AI Chat 免 Key 适配
+├── duckai-challenge.ts # Duck.ai 动态挑战 QuickJS WASM 沙箱
 ├── gemini-translate.ts # OpenAI <-> Gemini 协议翻译（Antigravity 复用）
 ├── antigravity.ts    # Antigravity 反代（OAuth + 协议翻译 + 可用模型）
 ├── codebuddy.ts      # CodeBuddy(腾讯) 反代（设备流授权 + 请求体改写 + SSE 规范化 + 积分查询 + 每日签到）

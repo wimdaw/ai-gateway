@@ -88,7 +88,7 @@ export function renderProviderPanel(p: Provider): string {
     <div class="fg"><label>渠道名称</label><input type="text" id="nm-${escapePageHtml(p.id)}" value="${escapePageHtml(p.name)}"></div>
     <div class="fg"><label>渠道 ID</label><input type="text" id="pid-${escapePageHtml(p.id)}" value="${escapePageHtml(p.id)}"></div>
   </div>
-  <div class="fg"><label>API 地址</label><input type="url" id="url-${escapePageHtml(p.id)}" value="${escapePageHtml(p.baseUrl)}" ${(p.type || 'openai') === 'azure-tts' ? 'disabled placeholder="Azure TTS 为内置服务，无需地址"' : ''}></div>
+  <div class="fg"><label>API 地址</label><input type="url" id="url-${escapePageHtml(p.id)}" value="${escapePageHtml(p.baseUrl)}" ${(p.type || 'openai') === 'azure-tts' ? 'disabled placeholder="Azure TTS 为内置服务，无需地址"' : p.type === 'duckai' ? 'disabled placeholder="Duck.ai 上游地址固定"' : ''}></div>
   <div class="fr">
     <div class="fg"><label>渠道类型</label>
       <select id="pt-${escapePageHtml(p.id)}" class="select-sm" onchange="onTypeChange(this, '${escapePageHtml(p.id)}')">
@@ -105,6 +105,7 @@ export function renderProviderPanel(p: Provider): string {
         <option value="geminiweb" ${p.type === 'geminiweb' ? 'selected' : ''}>Gemini 网页版反代 (Cookie)</option>
         <option value="minimaxweb" ${p.type === 'minimaxweb' ? 'selected' : ''}>MiniMax 网页版反代 (Token)</option>
         <option value="lingxi" ${p.type === 'lingxi' ? 'selected' : ''}>中国移动灵犀反代 (Cookie)</option>
+        <option value="duckai" ${p.type === 'duckai' ? 'selected' : ''}>Duck.ai AI Chat (免 Key)</option>
         <option value="grok" ${p.type === 'grok' ? 'selected' : ''}>Grok OAuth 反代</option>
         <option value="qwen" ${p.type === 'qwen' ? 'selected' : ''}>Qwen OAuth 反代</option>
         <option value="deepseek" ${p.type === 'deepseek' ? 'selected' : ''}>DeepSeek 反代</option>
@@ -194,7 +195,7 @@ export function renderProviderPanel(p: Provider): string {
   <div class="fg" data-hide-ag ${p.type === 'antigravity' ? 'style="display:none"' : ''}><label>镜像备用地址</label><textarea id="mir-${escapePageHtml(p.id)}" rows="2">${(p.mirrorUrls || []).map(escapePageHtml).join('\\n')}</textarea></div>
 
   <!-- 上游 API Keys 列表(超量分页, 「查看更多」按需加载, 编辑走增量接口) -->
-  <fieldset class="form-group"><legend>上游 API Keys<span style="font-weight:400;color:#888"> (共 ${(p.apiKeys || []).length} 个)</span></legend>
+  <fieldset class="form-group" data-hide-duckai ${p.type === 'duckai' ? 'style="display:none"' : ''}><legend>上游 API Keys<span style="font-weight:400;color:#888"> (共 ${(p.apiKeys || []).length} 个)</span></legend>
     <div id="keys-${escapePageHtml(p.id)}" data-shown="${(p.apiKeys || []).length > 10 ? 10 : (p.apiKeys || []).length}">${(p.apiKeys || []).slice(0, 10).map((k, ki) => `<div class="fc mb-3 field-row" data-kidx="${ki}"><input type="text" value="${escapePageHtml(k.key)}" class="fx1" id="k-${escapePageHtml(p.id)}-${ki}"><label class="tg"><input type="checkbox" ${k.enabled ? 'checked' : ''} id="ken-${escapePageHtml(p.id)}-${ki}" onchange="keyToggle(this)"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)">${icon('copy', '', 14)}</button><button class="icon-btn" onclick="testKeyRow(this)">${icon('plug', '', 14)}</button><button class="icon-btn" onclick="rmKeyRow(this)">${icon('times', '', 14)}</button></div>`).join('')}</div>
     ${(p.apiKeys || []).length > 10 ? `<div class="fc mb-3 field-row" id="kmore-${escapePageHtml(p.id)}"><button class="btn btn-s" onclick="loadMoreKeys(this)">查看更多(已显示 10 / 共 ${(p.apiKeys || []).length})</button></div>` : ''}
     <div class="fc mt-1 field-row"><input type="text" id="nk-${escapePageHtml(p.id)}" placeholder="添加新的 API Key" class="fx1"><button class="btn btn-s" onclick="addKeyRow('${escapePageHtml(p.id)}')">${icon('plus', '', 14)}添加</button></div>
@@ -341,7 +342,7 @@ ${H('控制台')}
             <div class="panel-heading">
               <div>
                 <span class="panel-heading__mark">${icon('plus', '', 16)}</span>
-                <div><h3>添加新渠道</h3><p>配置基础信息、专用反代参数及 API Keys。</p></div>
+                <div><h3>添加新渠道</h3><p>配置基础信息、专用反代参数及可选 API Keys。</p></div>
               </div>
               <button class="icon-btn" type="button" onclick="hideAdd()" aria-label="关闭">${icon('times', '', 14)}</button>
             </div>
@@ -370,6 +371,7 @@ ${H('控制台')}
                 <option value="geminiweb">Gemini 网页版反代 (Cookie)</option>
                 <option value="minimaxweb">MiniMax 网页版反代 (Token)</option>
                 <option value="lingxi">中国移动灵犀反代 (Cookie)</option>
+                <option value="duckai">Duck.ai AI Chat (免 Key)</option>
                 <option value="grok">Grok OAuth 反代</option>
                 <option value="qwen">Qwen OAuth 反代</option>
                 <option value="deepseek">DeepSeek 反代</option>
@@ -465,7 +467,7 @@ ${H('控制台')}
             </div>
 
             <!-- 上游 API Keys -->
-            <fieldset class="form-group"><legend>上游 API Keys</legend>
+            <fieldset class="form-group" data-hide-duckai><legend>上游 API Keys</legend>
               <div id="akeys">
                 <div class="fc mb-4 field-row">
                   <input type="text" placeholder="sk-xxx" class="fx1 aki">
@@ -530,8 +532,8 @@ ${H('控制台')}
                   <h3>${escapePageHtml(p.name)}</h3>
                   <div class="pu">
                     <code>${escapePageHtml(p.id)}</code>
-                    <span>${p.type === 'antigravity' ? 'Antigravity' : p.type === 'claude' ? 'Claude' : p.type === 'codex' ? 'Codex' : p.type === 'kimi' ? 'Kimi' : p.type === 'grok' ? 'Grok' : p.type === 'qwen' ? 'Qwen' : p.type === 'deepseek' ? 'DeepSeek' : p.type === 'vertex' ? 'Vertex' : p.type === 'devin' ? 'Devin' : p.type === 'codebuddy' ? 'CodeBuddy' : p.type === 'cline' ? 'Cline' : p.type === 'zai' ? 'Z.AI' : (p.apiType || 'openai') === 'anthropic' ? 'Anthropic' : 'OpenAI'}</span>
-                    <span>${p.apiKeys.length} 个 Key</span>
+                    <span>${p.type === 'duckai' ? 'Duck.ai AI Chat' : p.type === 'antigravity' ? 'Antigravity' : p.type === 'claude' ? 'Claude' : p.type === 'codex' ? 'Codex' : p.type === 'kimi' ? 'Kimi' : p.type === 'grok' ? 'Grok' : p.type === 'qwen' ? 'Qwen' : p.type === 'deepseek' ? 'DeepSeek' : p.type === 'vertex' ? 'Vertex' : p.type === 'devin' ? 'Devin' : p.type === 'codebuddy' ? 'CodeBuddy' : p.type === 'cline' ? 'Cline' : p.type === 'zai' ? 'Z.AI' : (p.apiType || 'openai') === 'anthropic' ? 'Anthropic' : 'OpenAI'}</span>
+                    <span>${p.type === 'duckai' ? '免 Key' : `${p.apiKeys.length} 个 Key`}</span>
                     <span>${p.models.length} 个模型</span>
                   </div>
                 </div>

@@ -388,6 +388,34 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
 
     const providerType = provider.type || 'openai'
 
+    // ===== Duck.ai AI Chat 免 Key 反代 =====
+    if (providerType === 'duckai') {
+      if (subPath !== 'chat/completions') {
+        return c.json({
+          error: { message: `duckai 渠道暂不支持端点 /v1/${subPath}`, type: 'invalid_request_error' },
+        }, 400)
+      }
+      const { handleDuckAiRequest } = await import('./duckai')
+      const response = await handleDuckAiRequest({
+        model: modelConfig.id,
+        messages: (body as any).messages,
+        stream: (body as any).stream === true,
+      })
+      const isStream = (response.headers.get('content-type') || '').includes('text/event-stream')
+      recordUsageLater(c, {
+        ts: new Date().toISOString(),
+        provider: providerId,
+        model: modelSafe,
+        token: maskedToken,
+        ok: response.ok,
+        status: response.status,
+        promptTokens: isStream ? 0 : Math.ceil(JSON.stringify((body as any).messages || '').length / 4),
+        completionTokens: 0,
+        latencyMs: Date.now() - startedAt,
+      })
+      return response
+    }
+
     // ===== Azure TTS 内置语音合成(无需 API Key, 参考 one-api-cf azure-tts-proxy) =====
     if (providerType === 'azure-tts' && subPath === 'audio/speech') {
       const { handleAzureTtsSpeech } = await import('./azure-tts')

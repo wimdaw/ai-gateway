@@ -70,6 +70,13 @@ writeFileSync(join(dist, '_routes.json'),
   JSON.stringify({ version: 1, include: ['/*'], exclude: ['/assets/*'] }, null, 2) + '\n', 'utf8')
 copyFileSync(join(root, 'index.html'), join(dist, 'index.html'))
 
+// QuickJS uses a precompiled WebAssembly.Module in Workers. Keep the compiled
+// module as a Pages Function module instead of embedding bytes in JavaScript.
+copyFileSync(
+  join(root, 'node_modules', '@cf-wasm', 'quickjs', 'dist', 'lib', 'RELEASE_SYNC.wasm'),
+  join(dist, 'duckai-quickjs.wasm'),
+)
+
 // ── 3) 打包 worker，注入资源 URL ─────────────────────────────────────────────
 await esbuild.build({
   entryPoints: [join(root, 'src', 'index.ts')],
@@ -83,6 +90,23 @@ await esbuild.build({
     __ASSET_SHARED_JS__: JSON.stringify(sharedAsset.url),
     __ASSET_ADMIN_JS__: JSON.stringify(adminAsset.url),
   },
+  plugins: [{
+    name: 'quickjs-compiled-wasm',
+    setup(build) {
+      build.onResolve({ filter: /^node:module$/ }, args => ({
+        path: args.path,
+        namespace: 'mock-node-module',
+      }))
+      build.onLoad({ filter: /.*/, namespace: 'mock-node-module' }, () => ({
+        contents: 'export function createRequire() { return () => ({}); }; export default { createRequire };',
+        loader: 'js',
+      }))
+      build.onResolve({ filter: /RELEASE_SYNC\.wasm$/ }, () => ({
+        path: './duckai-quickjs.wasm',
+        external: true,
+      }))
+    },
+  }],
   logLevel: 'warning',
 })
 

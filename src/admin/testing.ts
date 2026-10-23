@@ -19,6 +19,7 @@ import { testDeepSeek } from '../deepseek'
 import { testCodebuddy } from '../codebuddy'
 import { testCline } from '../cline'
 import { fetchZaiModels } from '../zai'
+import { fetchDuckAiModels, testDuckAiModel } from '../duckai'
 import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from '../opencode'
 import type { Env, TestModelRequest } from '../types'
 import { OAUTH_DEFAULT_MODELS } from './oauth'
@@ -82,6 +83,17 @@ export async function handleTestKeyNew(c: Context<{ Bindings: Env }>) {
   if (providerType && ['claude', 'codex', 'kimi', 'kimiweb', 'geminiweb', 'minimaxweb', 'lingxi', 'grok', 'qwen', 'deepseek', 'codebuddy', 'cline'].includes(providerType)) {
     const r = await testOAuthProvider(c.env, providerType, apiKey, model || OAUTH_DEFAULT_MODELS[providerType], url, providerId)
     return ok(c, { success: r.success, statusCode: r.statusCode || 0, message: r.message })
+  }
+
+  // Duck.ai is anonymous; read its live model directory without sending a chat prompt.
+  if (providerType === 'duckai') {
+    const result = await fetchDuckAiModels()
+    return ok(c, {
+      success: result.status > 0 && result.models.length > 0,
+      statusCode: result.status,
+      message: result.message,
+      data: { object: 'list', data: result.models.map((model) => ({ id: model.id, name: model.name, owned_by: 'duck.ai' })) },
+    })
   }
 
   // Z.AI: 上游 /models 需有效 Key，这里回内置清单（供「获取模型」按钮使用）
@@ -153,6 +165,12 @@ export async function handleTestModelNew(c: Context<{ Bindings: Env }>) {
   if (providerType && ['claude', 'codex', 'kimi', 'kimiweb', 'geminiweb', 'minimaxweb', 'lingxi', 'grok', 'qwen', 'deepseek', 'codebuddy', 'cline'].includes(providerType)) {
     const r = await testOAuthProvider(c.env, providerType, apiKey, model, url, providerId)
     return ok(c, { success: r.success, statusCode: r.statusCode || 0, message: r.message })
+  }
+
+  // Avoid a paid/side-effecting chat probe; confirm the model against Duck.ai's public catalog.
+  if (providerType === 'duckai') {
+    const result = await testDuckAiModel(model)
+    return ok(c, { success: result.success, statusCode: result.statusCode, message: result.message })
   }
 
   if (!url || !model) {

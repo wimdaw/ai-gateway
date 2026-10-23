@@ -3,6 +3,10 @@ pages_build_output_dir = "dist"
 compatibility_date = "2025-07-01"
 compatibility_flags = ["nodejs_compat"]
 
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "ai-gateway-db"
