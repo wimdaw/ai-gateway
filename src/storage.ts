@@ -139,6 +139,31 @@ export async function seedInitialData(env: Env): Promise<void> {
     await env.KV.put(KV_KEYS.OPENCODE_MIGRATION, '1')
   }
 
+  // Upgrade the untouched OpenCode seed once; keep any user-edited model list intact.
+  const modelsMigrationCompleted = await env.KV.get(KV_KEYS.OPENCODE_MODELS_MIGRATION)
+  if (!modelsMigrationCompleted && opencode) {
+    const currentProviders = await getProviders(env)
+    const currentOpenCode = currentProviders.find((provider) => provider.id === opencode.id)
+    const legacyIds = new Set([
+      'deepseek-v4-flash-free',
+      'mimo-v2.5-free',
+      'nemotron-3-ultra-free',
+      'hy3-free',
+    ])
+    const isUntouchedSeed = currentOpenCode
+      && currentOpenCode.models.length === legacyIds.size
+      && new Set(currentOpenCode.models.map((model) => model.id)).size === legacyIds.size
+      && currentOpenCode.models.every((model) => legacyIds.has(model.id) && model.enabled && !model.alias)
+
+    if (isUntouchedSeed) {
+      const now = new Date().toISOString()
+      await setProviders(env, currentProviders.map((provider) => provider.id === opencode.id
+        ? { ...provider, models: opencode.models.map((model) => ({ ...model })), updatedAt: now }
+        : provider))
+    }
+    await env.KV.put(KV_KEYS.OPENCODE_MODELS_MIGRATION, '1')
+  }
+
   // 仅首次运行时创建测试转发 Key
   if (providers.length === 0 && !migrationCompleted) {
     const keys = await getProxyKeys(env)

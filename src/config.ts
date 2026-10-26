@@ -29,6 +29,7 @@ export const KV_KEYS = {
   SESSION_PREFIX: 'admin:session:',
   KEY_HEALTH_PREFIX: 'key:health:',
   OPENCODE_MIGRATION: 'migration:opencode-default:v1',
+  OPENCODE_MODELS_MIGRATION: 'migration:opencode-model-catalog:v2',
 } as const
 
 // 有效期选项（秒）
@@ -48,10 +49,15 @@ export const DEFAULT_PROVIDERS: Provider[] = [
     apiType: 'openai',
     apiKeys: [],
     models: [
-      { id: 'deepseek-v4-flash-free', enabled: true },
-      { id: 'mimo-v2.5-free', enabled: true },
-      { id: 'nemotron-3-ultra-free', enabled: true },
-      { id: 'hy3-free', enabled: true },
+      { id: 'big-pickle', enabled: true },
+      { id: 'beam-free', enabled: true },
+      { id: 'flint-40b-free', enabled: true },
+      { id: 'mimo-v2.6-flash-free', enabled: true },
+      { id: 'nemotron-3.5-super-vl-free', enabled: true },
+      { id: 'nemotron-3.5-lightning-free', enabled: true },
+      { id: 'jev-1.13-free', enabled: true },
+      { id: 'deepseek-v4.1-flash-free', enabled: true },
+      { id: 'glm-5.3-flash-free', enabled: true },
     ],
     enabled: true,
     createdAt: new Date().toISOString(),

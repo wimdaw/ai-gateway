@@ -164,6 +164,10 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
         search: url.search,
         body: JSON.stringify(forwardBody),
         mirrorUrls: resolveOpenCodeUrls(c.env),
+        sessionId: c.req.header('x-opencode-session')
+          || c.req.header('x-opencode-session-id')
+          || c.req.header('x-session-affinity')
+          || c.req.header('x-session-id'),
       })
       return new Response(response.body, {
         status: response.status,
