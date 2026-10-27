@@ -13,8 +13,8 @@ export const OPENCODE_PROVIDER_ID = 'opencode'
 // 2026-10 上游已切到 2.x 客户端，UA 格式从 `opencode/<version> ai-sdk/...` 改为
 // `opencode/<channel>/<version>/<name>`（channel=prod，name=cli），
 // 并新增 x-opencode-session-id / x-session-affinity / X-Session-Id 头、移除 x-opencode-request。
-const OPENCODE_VERSION = '2.0.29'
-const OPENCODE_CHANNEL = 'prod'
+const OPENCODE_VERSION = '2.1.4'
+const OPENCODE_CHANNEL = 'latest'
 // 免费层模型出字慢，流式响应可能持续数分钟；超时过短会在生成中途掐断连接，客户端表现为「重新连接」
 const OPENCODE_TIMEOUT_MS = 300000
 
@@ -136,12 +136,12 @@ function getMirrorOrder(urls: string[], random: () => number): string[] {
 }
 
 function buildUrl(baseUrl: string, subPath: string, search = ''): string {
-  // 2026-10 上游把匿名免费层入口从 /zen/v1 迁到 /inference/v1：旧路径对 Bearer public
-  // 一律 403 FreeTierError。配置（后台/环境变量）里仍是旧写法，这里统一改写，避免改配置。
-  // 注意：仅对官方源站（opencode.ai）执行 /zen/v1 -> /inference/v1 改写，
-  // 避免破坏仅代理 /zen/v1 的第三方镜像源（如 cmliussss）。
+  // 官方源站（opencode.ai）最新 2.1.4 体系的 OpenAI 兼容端点在 /inference/openai/v1；
+  // 第三方镜像源（如 cmliussss）通常保持 /zen/v1 代理。
   const isOfficial = /https?:\/\/opencode\.ai(?::\d+)?(?=\/|$)/i.test(baseUrl)
-  const normalized = isOfficial ? baseUrl.replace(/\/zen\/v1(?=\/|$)/, '/inference/v1') : baseUrl
+  const normalized = isOfficial
+    ? baseUrl.replace(/\/zen\/v1(?=\/|$)/, '/inference/openai/v1').replace(/\/inference\/v1(?=\/|$)/, '/inference/openai/v1')
+    : baseUrl
   return `${normalized.replace(/\/+$/, '')}/${subPath.replace(/^\/+/, '')}${search}`
 }
 
@@ -216,20 +216,18 @@ export function ensureOpenCodeCompat(payload: any): void {
   injectCompatMarker(messages, OPENCODE_TITLE_BLOCK, OPENCODE_TITLE_PROBE)
 }
 
-function createRequestHeaders(apiKey: string, sessionId: string): Headers {
-  // 2.0 客户端指纹：UA 用 opencode/<channel>/<version>/<name> 四点格式；
-  // 会话相关头 x-opencode-session / x-opencode-session-id / x-session-affinity / X-Session-Id 值全部取同一会话 id，
-  // 与上游「会话亲和」判定对齐；x-opencode-request 已在 2.x 移除，不能再带。
+function createRequestHeaders(apiKey: string, sessionId: string, requestId: string): Headers {
+  // 2.1.4 客户端指纹：UA 用 opencode/<channel>/<version>/<name> 格式（opencode/latest/2.1.4/cli）；
+  // 携带上游服务所必需的 x-opencode-request、x-opencode-session、x-opencode-session-id。
   return new Headers({
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${apiKey}`,
     'User-Agent': `opencode/${OPENCODE_CHANNEL}/${OPENCODE_VERSION}/cli`,
     'x-opencode-client': 'cli',
     'x-opencode-project': 'global',
+    'x-opencode-request': requestId,
     'x-opencode-session-id': sessionId,
     'x-opencode-session': sessionId,
-    'x-session-affinity': sessionId,
-    'X-Session-Id': sessionId,
   })
 }
 
@@ -265,11 +263,12 @@ async function requestUpstream(
   url: string,
   apiKey: string,
   options: OpenCodeRequestOptions,
-  sessionId: string
+  sessionId: string,
+  requestId: string
 ): Promise<Response> {
   return fetcher(url, {
     method: options.method,
-    headers: createRequestHeaders(apiKey, sessionId),
+    headers: createRequestHeaders(apiKey, sessionId, requestId),
     body: options.method === 'GET' || options.method === 'HEAD' ? undefined : options.body,
     signal: AbortSignal.timeout(OPENCODE_TIMEOUT_MS),
   })
@@ -442,11 +441,12 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
   const fetcher = options.fetcher ?? fetch
   const random = options.random ?? Math.random
   const sessionId = createOpenCodeId('ses', true)
+  const requestId = createOpenCodeId('msg', false)
   let officialFailure: StoredFailure | null = null
   let mirrorFailure: StoredFailure | null = null
   let lastTransportError: unknown = null
 
-  // 预处理 POST chat/completions 请求体：适配 OpenCode 免费层规则（强制 stream + 内容指纹注入）
+  // 预处理 POST chat/completions 请求体：适配 OpenCode 免费层规则（强制 stream + 官方指纹注入）
   let clientWantsStream = true
   let upstreamBody = options.body
   let requestedModel = ''
@@ -457,8 +457,11 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
       if (parsed && typeof parsed === 'object') {
         requestedModel = typeof parsed.model === 'string' ? parsed.model : ''
         clientWantsStream = parsed.stream !== false && parsed.stream !== undefined
-        // 强制开启 stream，满足 OpenCode 免费层校验
+        // 强制开启 stream 与 usage 统计，完全对齐官方客户端
         parsed.stream = true
+        if (!parsed.stream_options) {
+          parsed.stream_options = { include_usage: true }
+        }
 
         // 免费层内容闸门：system 注入官方 prompt 片段；带 tools 时前置官方工具定义（详见 opencode-compat.ts）
         ensureOpenCodeCompat(parsed)
@@ -485,7 +488,8 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
           officialUrl,
           entry.key,
           upstreamOptions,
-          sessionId
+          sessionId,
+          requestId
         )
         if (response.ok) {
           if (!clientWantsStream && (response.headers.get('content-type') || '').includes('text/event-stream')) {
@@ -509,7 +513,8 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
         officialUrl,
         'public',
         upstreamOptions,
-        sessionId
+        sessionId,
+        requestId
       )
       if (response.ok) {
         if (!clientWantsStream && (response.headers.get('content-type') || '').includes('text/event-stream')) {
@@ -530,7 +535,8 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
         buildUrl(mirror, options.subPath, options.search),
         'public',
         upstreamOptions,
-        sessionId
+        sessionId,
+        requestId
       )
       if (response.ok) {
         if (!clientWantsStream && (response.headers.get('content-type') || '').includes('text/event-stream')) {
@@ -565,7 +571,7 @@ export async function testOpenCodeModel(
     body: JSON.stringify({
       model: modelId,
       messages: [{ role: 'user', content: 'hi' }],
-      max_tokens: 1,
+      max_tokens: 32,
     }),
     fetcher,
   })
