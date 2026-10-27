@@ -30,7 +30,6 @@ export const KV_KEYS = {
   KEY_HEALTH_PREFIX: 'key:health:',
   AG_HEALTH_PREFIX: 'ag:health:',
   OPENCODE_MIGRATION: 'migration:opencode-default:v1',
-  OPENCODE_MODELS_MIGRATION: 'migration:opencode-model-catalog:v2',
   USAGE_PREFIX: 'usage:req:',
 } as const
 
@@ -56,9 +55,9 @@ export const DEFAULT_PROVIDERS: Provider[] = [
     mirrorUrls: [
       'https://opencode.ai.cmliussss.net/zen/v1',
       'https://opencode.fastly.cmliussss.net/zen/v1',
-      'https://opencode.gcore.cmliussss.net/zen/v1',
     ],
     models: [
+      { id: 'deepseek-v4.1-flash-free', enabled: true },
       { id: 'big-pickle', enabled: true },
       { id: 'beam-free', enabled: true },
       { id: 'flint-40b-free', enabled: true },
@@ -66,7 +65,6 @@ export const DEFAULT_PROVIDERS: Provider[] = [
       { id: 'nemotron-3.5-super-vl-free', enabled: true },
       { id: 'nemotron-3.5-lightning-free', enabled: true },
       { id: 'jev-1.13-free', enabled: true },
-      { id: 'deepseek-v4.1-flash-free', enabled: true },
       { id: 'glm-5.3-flash-free', enabled: true },
     ],
     enabled: true,
