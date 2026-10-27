@@ -5,7 +5,7 @@
 FROM oven/bun:1-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN bun install
+RUN bun install --no-frozen-lockfile
 COPY . .
 RUN bun run build:node
 
@@ -14,7 +14,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8000
 COPY package*.json ./
-RUN bun install --production
+RUN bun install --production --no-frozen-lockfile
 COPY --from=builder /app/dist ./dist
 EXPOSE 8000
 CMD ["bun", "dist/bun-server.js"]
