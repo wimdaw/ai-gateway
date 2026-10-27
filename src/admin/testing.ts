@@ -19,8 +19,7 @@ import { testDeepSeek } from '../deepseek'
 import { testCodebuddy } from '../codebuddy'
 import { testCline } from '../cline'
 import { fetchZaiModels } from '../zai'
-import { fetchDuckAiModels, testDuckAiModel } from '../duckai'
-import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from '../opencode'
+import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeRelay, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from '../opencode'
 import type { Env, TestModelRequest } from '../types'
 import { OAUTH_DEFAULT_MODELS } from './oauth'
 import { buildAuthHeaders, filterFreeModels, normalizeMirrorUrls, normalizeModelsResponse } from './common'
@@ -48,7 +47,7 @@ export async function handleTestModel(c: Context<{ Bindings: Env }>) {
   // 多 key 轮询测试：逐个 key 尝试，遇 429/401/403/5xx 自动切换下一个 key，避免误报限流
   const ptype = provider.type || 'openai'
   const result = isOpenCodeProvider(provider.id)
-    ? await testOpenCodeModel(provider.baseUrl, enabledKeys, modelId, resolveProviderMirrorUrls(c.env, provider))
+    ? await testOpenCodeModel(provider.baseUrl, enabledKeys, modelId, resolveProviderMirrorUrls(c.env, provider), undefined, resolveOpenCodeRelay(c.env))
     : ptype === 'antigravity'
       ? await testAntigravityRotating(c.env, enabledKeys.map(k => k.key), modelId, provider.project)
       : ['claude', 'codex', 'kimi', 'kimiweb', 'geminiweb', 'minimaxweb', 'lingxi', 'grok', 'qwen', 'deepseek', 'codebuddy', 'cline'].includes(ptype)
@@ -85,17 +84,6 @@ export async function handleTestKeyNew(c: Context<{ Bindings: Env }>) {
     return ok(c, { success: r.success, statusCode: r.statusCode || 0, message: r.message })
   }
 
-  // Duck.ai is anonymous; read its live model directory without sending a chat prompt.
-  if (providerType === 'duckai') {
-    const result = await fetchDuckAiModels()
-    return ok(c, {
-      success: result.status > 0 && result.models.length > 0,
-      statusCode: result.status,
-      message: result.message,
-      data: { object: 'list', data: result.models.map((model) => ({ id: model.id, name: model.name, owned_by: 'duck.ai' })) },
-    })
-  }
-
   // Z.AI: 上游 /models 需有效 Key，这里回内置清单（供「获取模型」按钮使用）
   if (providerType === 'zai') {
     const models = fetchZaiModels().models
@@ -115,7 +103,7 @@ export async function handleTestKeyNew(c: Context<{ Bindings: Env }>) {
         return ok(c, { success: false, statusCode: 0, message: '请先填写 API Key 或配置镜像地址' })
       }
     }
-    const result = await fetchOpenCodeModels(url, [{ key: apiKey, enabled: true }], normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env))
+    const result = await fetchOpenCodeModels(url, [{ key: apiKey, enabled: true }], normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env), undefined, resolveOpenCodeRelay(c.env))
     return ok(c, {
         success: result.success,
         statusCode: result.statusCode || 0,
@@ -167,19 +155,13 @@ export async function handleTestModelNew(c: Context<{ Bindings: Env }>) {
     return ok(c, { success: r.success, statusCode: r.statusCode || 0, message: r.message })
   }
 
-  // Avoid a paid/side-effecting chat probe; confirm the model against Duck.ai's public catalog.
-  if (providerType === 'duckai') {
-    const result = await testDuckAiModel(model)
-    return ok(c, { success: result.success, statusCode: result.statusCode, message: result.message })
-  }
-
   if (!url || !model) {
     return fail(c, 'url、model 为必填项', 400)
   }
 
   if (providerId && isOpenCodeProvider(providerId)) {
     const apiKeys = apiKey ? [{ key: apiKey, enabled: true }] : []
-    const result = await testOpenCodeModel(url, apiKeys, model, normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env))
+    const result = await testOpenCodeModel(url, apiKeys, model, normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env), undefined, resolveOpenCodeRelay(c.env))
     return ok(c, { success: result.success, statusCode: result.statusCode || 0, message: result.message })
   }
 
