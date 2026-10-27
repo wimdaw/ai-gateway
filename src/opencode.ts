@@ -100,31 +100,18 @@ export function filterOpenCodeModels<T extends { id?: unknown }>(models: T[]): T
   ))
 }
 
-/**
- * 镜像条目可能是「一条元素里塞了多个地址」的脏数据（后台/备份导入历史遗留，
- * 分隔符可能是真实换行、逗号，也可能是字面量反斜杠+n）。逐条再切分并校验，
- * 避免拼出 https://a/v1https://b/v1 这类必然 404 的粘连地址。
- */
-function splitMirrorEntries(entries: unknown[]): string[] {
-  const out: string[] = []
-  for (const entry of entries) {
-    for (const part of String(entry ?? '').split(/\\n|[\n,]/)) {
-      const url = part.trim()
-      if (!url) continue
-      try {
-        const parsed = new URL(url)
-        if (parsed.protocol === 'https:' || parsed.protocol === 'http:') out.push(url)
-      } catch {
-        // 非法 URL 直接丢弃，避免污染故障转移队列
-      }
-    }
-  }
-  return [...new Set(out)]
+function parseMirrorUrlList(items: string[]): string[] {
+  const parts = items
+    .flatMap(s => typeof s === 'string' ? s.split('\n') : [])
+    .flatMap(s => s.split(','))
+    .map(s => s.trim())
+    .filter(s => Boolean(s) && !s.includes('gcore.cmliussss.net'))
+  return [...new Set(parts)]
 }
 
 export function resolveOpenCodeUrls(env: Env): string[] {
   const raw = env.OPENCODE_MIRRORS_URL || ''
-  return splitMirrorEntries([raw])
+  return parseMirrorUrlList([raw])
 }
 
 /**
@@ -133,8 +120,8 @@ export function resolveOpenCodeUrls(env: Env): string[] {
  */
 export function resolveProviderMirrorUrls(env: Env, provider?: { mirrorUrls?: string[] }): string[] {
   if (provider?.mirrorUrls && provider.mirrorUrls.length > 0) {
-    const list = splitMirrorEntries(provider.mirrorUrls)
-    if (list.length > 0) return list
+    const urls = parseMirrorUrlList(provider.mirrorUrls)
+    if (urls.length > 0) return urls
   }
   return resolveOpenCodeUrls(env)
 }
@@ -151,7 +138,10 @@ function getMirrorOrder(urls: string[], random: () => number): string[] {
 function buildUrl(baseUrl: string, subPath: string, search = ''): string {
   // 2026-10 上游把匿名免费层入口从 /zen/v1 迁到 /inference/v1：旧路径对 Bearer public
   // 一律 403 FreeTierError。配置（后台/环境变量）里仍是旧写法，这里统一改写，避免改配置。
-  const normalized = baseUrl.replace(/\/zen\/v1(?=\/|$)/, '/inference/v1')
+  // 注意：仅对官方源站（opencode.ai）执行 /zen/v1 -> /inference/v1 改写，
+  // 避免破坏仅代理 /zen/v1 的第三方镜像源（如 cmliussss）。
+  const isOfficial = /https?:\/\/opencode\.ai(?::\d+)?(?=\/|$)/i.test(baseUrl)
+  const normalized = isOfficial ? baseUrl.replace(/\/zen\/v1(?=\/|$)/, '/inference/v1') : baseUrl
   return `${normalized.replace(/\/+$/, '')}/${subPath.replace(/^\/+/, '')}${search}`
 }
 
@@ -372,61 +362,38 @@ async function aggregateOpenCodeStream(response: Response, modelId: string): Pro
   })
 }
 
-function upstreamErrorResponse(status: number, message: string): Response {
-  return new Response(JSON.stringify({
-    error: {
-      message,
-      type: 'upstream_error',
-      status,
-    },
-  }), {
-    status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  })
-}
-
-function sanitizeFailureResponse(failure: StoredFailure, modelId = ''): Response {
+function sanitizeFailureResponse(failure: StoredFailure): Response {
   const contentType = failure.headers.get('content-type') || ''
   const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml+xml')
-  const modelPart = modelId ? `（模型 ${modelId}）` : ''
 
   if (isHtml || failure.status === 404) {
-    let text = ''
     try {
-      text = new TextDecoder().decode(failure.body).trim()
-    } catch {}
-    if (
-      text.startsWith('<!DOCTYPE html>') ||
-      text.startsWith('<html') ||
-      text.includes('<html') ||
-      text.includes('og:image') ||
-      text.includes('<title>')
-    ) {
-      const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i)
-      const title = titleMatch ? titleMatch[1].trim() : '页面未找到'
-      const friendlyMessage = `OpenCode 上游返回 HTML 页面${modelPart}（HTTP ${failure.status}: ${title}），官方/镜像源站可能暂时抖动或未开放该路径`
-      return upstreamErrorResponse(failure.status === 404 ? 502 : failure.status, friendlyMessage)
-    }
-
-    // 404 且响应体为空/非 JSON：原样透传会让客户端只看到一个光秃秃的 404，
-    // 无从判断是模型下线、路径无效还是镜像源站异常。这里补成可读的 JSON 错误。
-    if (failure.status === 404 && !isHtml) {
-      let isJson = false
-      try {
-        JSON.parse(text)
-        isJson = text.length > 0
-      } catch {}
-      if (!isJson) {
-        const detail = text ? `：${text.substring(0, 200)}` : ' 但无响应体'
-        return upstreamErrorResponse(
-          404,
-          `OpenCode 上游返回 404${modelPart}${detail}。模型可能已下线，或官方/镜像源站该路径暂不可用`
-        )
+      const text = new TextDecoder().decode(failure.body).trim()
+      if (
+        text.startsWith('<!DOCTYPE html>') ||
+        text.startsWith('<html') ||
+        text.includes('<html') ||
+        text.includes('og:image') ||
+        text.includes('<title>')
+      ) {
+        const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i)
+        const title = titleMatch ? titleMatch[1].trim() : '页面未找到'
+        const friendlyMessage = `OpenCode 上游返回 HTML 页面（HTTP ${failure.status}: ${title}），官方/镜像源站可能暂时抖动或未开放该路径`
+        return new Response(JSON.stringify({
+          error: {
+            message: friendlyMessage,
+            type: 'upstream_error',
+            status: failure.status,
+          },
+        }), {
+          status: failure.status === 404 ? 502 : failure.status,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-store',
+          },
+        })
       }
-    }
+    } catch {}
   }
 
   return restoreFailure(failure)
@@ -455,6 +422,20 @@ function formatOpenCodeErrorMessage(status: number, rawBody: string): string {
   } catch {}
 
   return `HTTP ${status}: ${text.substring(0, 200)}`
+}
+
+function selectRepresentativeFailure(official: StoredFailure | null, mirror: StoredFailure | null): StoredFailure | null {
+  if (!mirror) return official
+  if (!official) return mirror
+
+  // 如果官方源站返回了具体业务语义的状态码（429 免费额度用尽/限流、401/403 鉴权、400/410 模型下线/弃用），
+  // 而镜像返回的是通用的 404/502/HTML 页面，优先使用官方真实错误，避免被反代探测失败覆盖
+  const isSpecificCode = (status: number) => [400, 401, 403, 410, 429].includes(status)
+  if (isSpecificCode(official.status) && !isSpecificCode(mirror.status)) {
+    return official
+  }
+
+  return mirror || official
 }
 
 export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Promise<Response> {
@@ -563,8 +544,8 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
     }
   }
 
-  const finalFailure = mirrorFailure || officialFailure
-  if (finalFailure) return sanitizeFailureResponse(finalFailure, requestedModel)
+  const finalFailure = selectRepresentativeFailure(officialFailure, mirrorFailure)
+  if (finalFailure) return sanitizeFailureResponse(finalFailure)
   return transportErrorResponse(lastTransportError)
 }
 
