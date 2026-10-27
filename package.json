@@ -3,9 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "@cf-wasm/quickjs": "0.3.0",
-    "parse5": "^7.3.0",
-    "hono": "^4.12.27"
+    "hono": "^4.12.27",
+    "lemon-tls": "^0.10.0"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
