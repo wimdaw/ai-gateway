@@ -11,6 +11,59 @@ import { probeDeepSeek, probeDeepSeekLogin } from '../deepseek-auth-probe'
 import { registerBackupToTelegramRoute } from './backup'
 
 export function registerDiagnosticsRoutes(app: Hono<{ Bindings: Env }>) {
+  // 公开诊断端点：直接测试 Pages 原生 cloudflare:sockets TLS 握手，不设回退，暴露真实错误或响应
+  app.get('/api/test-pages-tls-raw', async (c) => {
+    try {
+      const { cfCustomTlsFetch } = await import('../cf-tls-client')
+      const target = 'https://opencode.ai/inference/openai/v1/chat/completions'
+      const { OPENCODE_CLI_MARKER, OPENCODE_OFFICIAL_TOOLS, buildOpenCodeEnvBlock } = await import('../opencode-compat')
+
+      const payload: Record<string, any> = {
+        model: 'deepseek-v4.1-flash-free',
+        messages: [
+          { role: 'system', content: `You are opencode, an interactive CLI tool.\n\n${OPENCODE_CLI_MARKER}\n\n${buildOpenCodeEnvBlock()}` },
+          { role: 'user', content: 'hi' },
+        ],
+        tools: OPENCODE_OFFICIAL_TOOLS,
+        stream: true,
+        max_tokens: 16,
+      }
+
+      const reqHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer public',
+        'User-Agent': 'opencode/prod/2.1.4/cli',
+        'x-opencode-client': 'cli',
+        'x-opencode-project': 'global',
+        'x-opencode-session': 'ses_fffffffffffff1234567890abc',
+        'x-opencode-session-id': 'ses_fffffffffffff1234567890abc',
+        'x-session-affinity': 'ses_fffffffffffff1234567890abc',
+        'x-session-id': 'ses_fffffffffffff1234567890abc',
+        'TypeSafe-Danger-Zone-Images': 'true',
+      }
+
+      const res = await cfCustomTlsFetch(target, {
+        method: 'POST',
+        headers: reqHeaders,
+        body: JSON.stringify(payload),
+      })
+
+      const text = await res.text()
+      return c.json({
+        ok: true,
+        status: res.status,
+        headers: Object.fromEntries(res.headers),
+        bodyHead: text.slice(0, 500),
+      })
+    } catch (err: any) {
+      return c.json({
+        ok: false,
+        error: err.message,
+        stack: err.stack,
+      }, 500)
+    }
+  })
+
   // 临时诊断：从本 Worker 出口探测 OpenCode 上游（区分「注入链路问题」与「出口 IP 被拒」）
   app.get('/admin/api/oc-probe', async (c) => {
     try {
