@@ -20,6 +20,7 @@ export interface Provider {
    *          | claude | codex | kimi | grok | qwen | codebuddy (OAuth 反代, 复刻 CLIProxyAPI)
    *          | deepseek (官方 API Key / 网页 userToken 反代) | zai (Z.AI 预设, 缺省 openai)
    *          | cline (cline.bot 网页反代, 凭据为 WorkOS 设备码流程获取的 refreshToken)
+   *          | chatgptweb (ChatGPT 网页/App 反代, 凭据为 RT(rt.1.xxx / rt_xxx), 走 /backend-api/conversation + Sentinel PoW)
    *          | kimiweb (Kimi 网页版反代, 凭据为 www.kimi.ai 的 access_token/refresh_token)
    *          | geminiweb (Gemini 网页版反代, 凭据为 gemini.google.com 的 Cookie)
    *          | minimaxweb (MiniMax Agent 网页反代, 凭据为 token|agentId|uuid|deviceId|userId)
@@ -228,6 +229,10 @@ export interface Env {
   ADMIN_USERNAME?: string
   ADMIN_PASSWORD?: string
   OPENCODE_MIRRORS_URL?: string
+  /** 门禁3 TLS 中继地址（由跑在 Bun 上的节点代发 opencode.ai 请求）；为空则直连官方源站 */
+  OPENCODE_RELAY_URL?: string
+  /** TLS 中继鉴权令牌，未设时用代码内默认值 */
+  OPENCODE_RELAY_TOKEN?: string
   /** Antigravity OAuth 客户端凭据, 经 Worker 密钥下发(wrangler secret put), 不入库 */
   AG_CLIENT_ID?: string
   AG_CLIENT_SECRET?: string

@@ -3,7 +3,7 @@ import { getProvider, getProviders } from './storage'
 import { getKV } from './storage-adapter'
 import { KV_KEYS, KEY_HEALTH_COOLDOWN_MS, KEY_HEALTH_MAX_FAILURES } from './config'
 import type { Env, ProxyRequestBody, UsageRecord } from './types'
-import { isOpenCodeProvider, proxyOpenCodeRequest, resolveOpenCodeUrls, resolveProviderMirrorUrls } from './opencode'
+import { isOpenCodeProvider, proxyOpenCodeRequest, resolveOpenCodeRelay, resolveOpenCodeUrls, resolveProviderMirrorUrls } from './opencode'
 import { addUsageRecord } from './storage'
 
 /** 从响应体提取 token 用量（OpenAI / Anthropic 兼容） */
@@ -636,6 +636,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
         search: url.search,
         body: forwardPayload as string,
         mirrorUrls: resolveProviderMirrorUrls(c.env, provider),
+        relay: resolveOpenCodeRelay(c.env),
       })
       const headers = new Headers(response.headers)
       headers.set('Cache-Control', 'no-store')

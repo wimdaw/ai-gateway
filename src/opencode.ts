@@ -2,19 +2,22 @@ import type { ApiKeyEntry, Env } from './types'
 import {
   OPENCODE_COMPAT_HEAD,
   OPENCODE_COMPAT_TAIL,
-  OPENCODE_TITLE_MARKER,
   OPENCODE_CLI_MARKER,
   OPENCODE_OFFICIAL_TOOLS,
+  buildOpenCodeEnvBlock,
 } from './opencode-compat'
 
 export const OPENCODE_PROVIDER_ID = 'opencode'
 
 // 上游服务端按 OpenCode 客户端指纹校验免费层请求（FreeTierError）。
-// 2026-10 上游已切到 2.x 客户端，UA 格式从 `opencode/<version> ai-sdk/...` 改为
-// `opencode/<channel>/<version>/<name>`（channel=prod，name=cli），
-// 并新增 x-opencode-session-id / x-session-affinity / X-Session-Id 头、移除 x-opencode-request。
+// 2026-10-27 第四轮实测定案：免费池有三道门禁 ——
+//   1) system 里必须含 <env> 块（Working directory / Workspace root folder 均为 /workspace）；
+//   2) body 必须声明官方 11 工具；
+//   3) TLS ClientHello 必须是 Bun/BoringSSL 的 17-cipher 列表（JA4 cipher hash 5b57614c22b0）。
+// 门禁 3 平台自开 TLS 无法满足，只有 Node/Bun 运行时能控制，故由 Koyeb（Bun）做 TLS 中继。
+// UA 为 `opencode/prod/2.1.4/cli`；2.x 已移除 x-opencode-request，会话四件套同值。
 const OPENCODE_VERSION = '2.1.4'
-const OPENCODE_CHANNEL = 'latest'
+const OPENCODE_CHANNEL = 'prod'
 // 免费层模型出字慢，流式响应可能持续数分钟；超时过短会在生成中途掐断连接，客户端表现为「重新连接」
 const OPENCODE_TIMEOUT_MS = 300000
 
@@ -57,10 +60,11 @@ function createOpenCodeId(prefix: string, descending = false): string {
   return `${prefix}_${hex}${randomBase62(14)}`
 }
 
-// 免费层内容闸门（详见 opencode-compat.ts）：system 必须含官方 prompt 片段，
-// 带 tools 的请求还要求 tools 以官方工具集开头。两个 marker 的注入块在此拼好。
-const OPENCODE_TITLE_BLOCK = `${OPENCODE_COMPAT_HEAD}\n${OPENCODE_TITLE_MARKER}\n${OPENCODE_COMPAT_TAIL}`
-const OPENCODE_CLI_BLOCK = `${OPENCODE_COMPAT_HEAD}\n${OPENCODE_CLI_MARKER}\n${OPENCODE_COMPAT_TAIL}`
+// 免费层内容闸门（详见 opencode-compat.ts）：system 必须含官方 prompt 片段 **且** 含 <env> 块；
+// tools 必须以官方 11 工具开头。注入块每次按当前日期重建（<env> 里的 Today's date）。
+function buildCompatBlock(marker: string): string {
+  return `${OPENCODE_COMPAT_HEAD}\n${marker}\n${buildOpenCodeEnvBlock()}\n${OPENCODE_COMPAT_TAIL}`
+}
 
 interface OpenCodeRequestOptions {
   baseUrl: string
@@ -72,6 +76,29 @@ interface OpenCodeRequestOptions {
   body?: string
   fetcher?: typeof fetch
   random?: () => number
+  /** 门禁3 中继：平台自开 TLS 时（Pages / EdgeOne）改由能控制 ClientHello 的节点代发。 */
+  relay?: OpenCodeRelayConfig | null
+}
+
+export interface OpenCodeRelayConfig {
+  url: string
+  token: string
+}
+
+/**
+ * TLS 中继令牌。Pages / EdgeOne 的出口 TLS 由平台决定，拿不到 Bun 的 17-cipher
+ * 指纹，必然 429；把请求转给跑在 Bun 上的 Koyeb 端代发。可用环境变量覆盖。
+ */
+export const OPENCODE_RELAY_TOKEN_DEFAULT = 'oc_relay_2f4c8a1d6b9e3f70c5a2d84b1e6f9073'
+
+/** 读取 OPENCODE_RELAY_URL 配置；未配置返回 null（表示直连官方源站）。 */
+export function resolveOpenCodeRelay(env: Env): OpenCodeRelayConfig | null {
+  const url = (env.OPENCODE_RELAY_URL || '').trim()
+  if (!url) return null
+  return {
+    url: url.replace(/\/+$/, ''),
+    token: (env.OPENCODE_RELAY_TOKEN || '').trim() || OPENCODE_RELAY_TOKEN_DEFAULT,
+  }
 }
 
 interface StoredFailure {
@@ -184,51 +211,55 @@ function injectCompatMarker(messages: any[], block: string, probe: string): void
 }
 
 /**
- * 免费层兼容处理（详见 opencode-compat.ts）：
- * - 请求带 tools：system 注入官方 CLI 提示词片段，且 tools 前置官方 11 工具定义
- *   （name + parameters 原样，description 为劝阻语；客户端原工具保留在后）；
- * - 请求不带 tools：system 注入官方「标题生成」提示词片段即可。
+ * 免费层兼容处理（详见 opencode-compat.ts）。上游两道独立闸门，缺一即 429：
+ * - 门禁 1：system 含 <env> 块（Working directory / Workspace root folder = /workspace）；
+ * - 门禁 2：body 声明 tools，且以官方 11 工具（name + parameters 原样）开头。
+ * 因此**所有** chat 请求都注入 CLI 提示词片段 + <env>，并前置官方工具集；
+ * 客户端本来不带工具时补 tool_choice='none'，避免模型真去调用这些占位定义。
  * 幂等：重复调用（重试/客户端已注入）不会二次追加。
  */
 export function ensureOpenCodeCompat(payload: any): void {
   const messages = Array.isArray(payload?.messages) ? payload.messages : null
   if (!messages || messages.length === 0) return
 
-  const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0
-
-  if (hasTools) {
-    const tools = payload.tools as any[]
-    // 客户端工具与官方工具同名时，上游会以 "must not be specified more than once" 400 拒绝，
-    // 因此这里剔除客户端的重名项（官方定义必须保留，它是免费层校验依据）。
-    const officialNames = new Set(OPENCODE_OFFICIAL_TOOLS.map((tool) => tool.function.name))
-    const clientTools = tools.filter((tool) => !officialNames.has(tool?.function?.name ?? tool?.name))
-    const alreadyPrepended =
-      clientTools.length === tools.length &&
-      tools.length >= OPENCODE_OFFICIAL_TOOLS.length &&
-      OPENCODE_OFFICIAL_TOOLS.every((official, index) => officialToolKey(tools[index]) === officialToolKey(official))
-    if (!alreadyPrepended) {
-      payload.tools = [...OPENCODE_OFFICIAL_TOOLS.map((tool) => JSON.parse(JSON.stringify(tool))), ...clientTools]
-    }
-    injectCompatMarker(messages, OPENCODE_CLI_BLOCK, OPENCODE_CLI_PROBE)
-    return
+  const tools = Array.isArray(payload.tools) ? payload.tools as any[] : []
+  const hasClientTools = tools.length > 0
+  // 客户端工具与官方工具同名时，上游会以 "must not be specified more than once" 400 拒绝，
+  // 因此这里剔除客户端的重名项（官方定义必须保留，它是免费层校验依据）。
+  const officialNames = new Set(OPENCODE_OFFICIAL_TOOLS.map((tool) => tool.function.name))
+  const clientTools = tools.filter((tool) => !officialNames.has(tool?.function?.name ?? tool?.name))
+  const alreadyPrepended =
+    clientTools.length === tools.length &&
+    tools.length >= OPENCODE_OFFICIAL_TOOLS.length &&
+    OPENCODE_OFFICIAL_TOOLS.every((official, index) => officialToolKey(tools[index]) === officialToolKey(official))
+  if (!alreadyPrepended) {
+    payload.tools = [...OPENCODE_OFFICIAL_TOOLS.map((tool) => JSON.parse(JSON.stringify(tool))), ...clientTools]
+  }
+  if (!hasClientTools && payload.tool_choice === undefined) {
+    payload.tool_choice = 'none'
   }
 
-  injectCompatMarker(messages, OPENCODE_TITLE_BLOCK, OPENCODE_TITLE_PROBE)
+  injectCompatMarker(messages, buildCompatBlock(OPENCODE_CLI_MARKER), OPENCODE_CLI_PROBE)
 }
 
-function createRequestHeaders(apiKey: string, sessionId: string, requestId: string): Headers {
-  // 2.1.4 客户端指纹：UA 用 opencode/<channel>/<version>/<name> 格式（opencode/latest/2.1.4/cli）；
-  // 携带上游服务所必需的 x-opencode-request、x-opencode-session、x-opencode-session-id。
-  return new Headers({
+function createRequestHeaders(apiKey: string, sessionId: string, relayToken?: string): Headers {
+  // 2.x 客户端指纹：UA = opencode/prod/2.1.4/cli；会话头四件套必须同值
+  // （x-opencode-session / x-opencode-session-id / x-session-affinity / x-session-id）；
+  // x-opencode-request 在 2.x 已移除，带上反而会被判成非官方客户端。
+  const headers = new Headers({
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${apiKey}`,
     'User-Agent': `opencode/${OPENCODE_CHANNEL}/${OPENCODE_VERSION}/cli`,
     'x-opencode-client': 'cli',
     'x-opencode-project': 'global',
-    'x-opencode-request': requestId,
-    'x-opencode-session-id': sessionId,
     'x-opencode-session': sessionId,
+    'x-opencode-session-id': sessionId,
+    'x-session-affinity': sessionId,
+    'x-session-id': sessionId,
+    'TypeSafe-Danger-Zone-Images': 'true',
   })
+  if (relayToken) headers.set('x-opencode-relay-token', relayToken)
+  return headers
 }
 
 async function storeFailure(response: Response): Promise<StoredFailure> {
@@ -264,11 +295,11 @@ async function requestUpstream(
   apiKey: string,
   options: OpenCodeRequestOptions,
   sessionId: string,
-  requestId: string
+  relayToken?: string
 ): Promise<Response> {
   return fetcher(url, {
     method: options.method,
-    headers: createRequestHeaders(apiKey, sessionId, requestId),
+    headers: createRequestHeaders(apiKey, sessionId, relayToken),
     body: options.method === 'GET' || options.method === 'HEAD' ? undefined : options.body,
     signal: AbortSignal.timeout(OPENCODE_TIMEOUT_MS),
   })
@@ -441,7 +472,6 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
   const fetcher = options.fetcher ?? fetch
   const random = options.random ?? Math.random
   const sessionId = createOpenCodeId('ses', true)
-  const requestId = createOpenCodeId('msg', false)
   let officialFailure: StoredFailure | null = null
   let mirrorFailure: StoredFailure | null = null
   let lastTransportError: unknown = null
@@ -480,6 +510,30 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
   const enabledKeys = options.apiKeys.filter((entry) => entry.enabled && entry.key)
   const officialUrl = buildUrl(options.baseUrl, options.subPath, options.search)
 
+  // 门禁3：出口 TLS 由平台决定的端（Pages / EdgeOne）走 TLS 中继，交给 Bun 节点代发。
+  // 官方源站与镜像在这种出口上必然 429，不再浪费往返。
+  if (options.relay && options.relay.url) {
+    try {
+      const response = await requestUpstream(
+        fetcher,
+        buildUrl(options.relay.url, options.subPath, options.search),
+        'public',
+        upstreamOptions,
+        sessionId,
+        options.relay.token
+      )
+      if (response.ok) {
+        if (!clientWantsStream && (response.headers.get('content-type') || '').includes('text/event-stream')) {
+          return aggregateOpenCodeStream(response, requestedModel)
+        }
+        return response
+      }
+      return sanitizeFailureResponse(await storeFailure(response))
+    } catch (error) {
+      return transportErrorResponse(error)
+    }
+  }
+
   if (enabledKeys.length > 0) {
     for (const entry of enabledKeys) {
       try {
@@ -488,8 +542,7 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
           officialUrl,
           entry.key,
           upstreamOptions,
-          sessionId,
-          requestId
+          sessionId
         )
         if (response.ok) {
           if (!clientWantsStream && (response.headers.get('content-type') || '').includes('text/event-stream')) {
@@ -513,8 +566,7 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
         officialUrl,
         'public',
         upstreamOptions,
-        sessionId,
-        requestId
+        sessionId
       )
       if (response.ok) {
         if (!clientWantsStream && (response.headers.get('content-type') || '').includes('text/event-stream')) {
@@ -535,8 +587,7 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
         buildUrl(mirror, options.subPath, options.search),
         'public',
         upstreamOptions,
-        sessionId,
-        requestId
+        sessionId
       )
       if (response.ok) {
         if (!clientWantsStream && (response.headers.get('content-type') || '').includes('text/event-stream')) {
@@ -560,7 +611,8 @@ export async function testOpenCodeModel(
   apiKeys: ApiKeyEntry[],
   modelId: string,
   mirrorUrls: string[],
-  fetcher?: typeof fetch
+  fetcher?: typeof fetch,
+  relay?: OpenCodeRelayConfig | null
 ): Promise<OpenCodeTestResult> {
   const response = await proxyOpenCodeRequest({
     baseUrl,
@@ -574,6 +626,7 @@ export async function testOpenCodeModel(
       max_tokens: 32,
     }),
     fetcher,
+    relay,
   })
 
   if (response.ok) {
@@ -592,7 +645,8 @@ export async function fetchOpenCodeModels(
   baseUrl: string,
   apiKeys: ApiKeyEntry[],
   mirrorUrls: string[],
-  fetcher?: typeof fetch
+  fetcher?: typeof fetch,
+  relay?: OpenCodeRelayConfig | null
 ): Promise<OpenCodeTestResult> {
   const response = await proxyOpenCodeRequest({
     baseUrl,
@@ -601,6 +655,7 @@ export async function fetchOpenCodeModels(
     method: 'GET',
     subPath: 'models',
     fetcher,
+    relay,
   })
 
   if (!response.ok) {

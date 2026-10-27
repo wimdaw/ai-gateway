@@ -50,7 +50,7 @@ import {
 } from './cline'
 import { fetchChatgptWebModels, listChatgptWebModels, testChatgptWeb } from './chatgpt-web'
 import { fetchZaiModels } from './zai'
-import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from './opencode'
+import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeRelay, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from './opencode'
 import { PROXY_KEY_PREFIX, EXPIRY_OPTIONS, OPENCODE_DEFAULT_URL } from './config'
 import type {
   Env,
@@ -531,7 +531,7 @@ export async function handleTestModel(c: Context<{ Bindings: Env }>) {
   // 多 key 轮询测试：逐个 key 尝试，遇 429/401/403/5xx 自动切换下一个 key，避免误报限流
   const ptype = provider.type || 'openai'
   const result = isOpenCodeProvider(provider.id)
-    ? await testOpenCodeModel(provider.baseUrl, enabledKeys, modelId, resolveProviderMirrorUrls(c.env, provider))
+    ? await testOpenCodeModel(provider.baseUrl, enabledKeys, modelId, resolveProviderMirrorUrls(c.env, provider), undefined, resolveOpenCodeRelay(c.env))
     : ptype === 'antigravity'
       ? await testAntigravityRotating(c.env, enabledKeys.map(k => k.key), modelId, provider.project)
       : ['claude', 'codex', 'kimi', 'kimiweb', 'geminiweb', 'minimaxweb', 'lingxi', 'grok', 'qwen', 'deepseek', 'codebuddy', 'cline', 'chatgptweb'].includes(ptype)
@@ -632,7 +632,7 @@ export async function handleTestKeyNew(c: Context<{ Bindings: Env }>) {
         })
       }
     }
-    const result = await fetchOpenCodeModels(url, [{ key: apiKey, enabled: true }], normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env))
+    const result = await fetchOpenCodeModels(url, [{ key: apiKey, enabled: true }], normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env), undefined, resolveOpenCodeRelay(c.env))
     return c.json<ApiResponse>({
       success: true,
       data: {
@@ -766,7 +766,7 @@ export async function handleTestModelNew(c: Context<{ Bindings: Env }>) {
 
   if (providerId && isOpenCodeProvider(providerId)) {
     const apiKeys = apiKey ? [{ key: apiKey, enabled: true }] : []
-    const result = await testOpenCodeModel(url, apiKeys, model, normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env))
+    const result = await testOpenCodeModel(url, apiKeys, model, normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env), undefined, resolveOpenCodeRelay(c.env))
     return c.json<ApiResponse>({
       success: true,
       data: { success: result.success, statusCode: result.statusCode || 0, message: result.message },

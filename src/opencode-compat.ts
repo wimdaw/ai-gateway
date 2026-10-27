@@ -12,6 +12,26 @@
  * 下列文本/结构均取自官方 1.19.0 客户端经抓包还原的真实请求（逐字未改，description 除外）。
  */
 
+/**
+ * 门禁 1（2026-10-27 定案）：system 里必须出现官方客户端的 <env> 环境块，
+ * 其中两个路径字段必须是 /workspace —— 上游按这两个字符串逐字匹配。
+ * 与门禁 2（tools 里声明官方 11 工具）是两道独立闸门：缺任一半即 429
+ * FreeUsageLimitError，与 UA / 请求头 / 会话形态无关。
+ */
+export const OPENCODE_ENV_PROBE = 'Working directory: /workspace'
+
+export function buildOpenCodeEnvBlock(now: Date = new Date()): string {
+  return [
+    '<env>',
+    '  Working directory: /workspace',
+    '  Workspace root folder: /workspace',
+    '  Is directory a git repo: no',
+    '  Platform: linux',
+    `  Today's date: ${now.toDateString()}`,
+    '</env>',
+  ].join('\n')
+}
+
 /** 无 tools 请求使用：官方「标题生成」system 提示词前 1200 字符 */
 export const OPENCODE_TITLE_MARKER = "You are a title generator. You output ONLY a thread title. Nothing else.\n\n<task>\nGenerate a brief title that would help the user find this conversation later.\n\nFollow all rules in <rules>\nUse the <examples> so you know what a good title looks like.\nYour output must be:\n- A single line\n- ≤50 characters\n- No explanations\n</task>\n\n<rules>\n- you MUST use the same language as the user message you are summarizing\n- Title must be grammatically correct and read naturally - no word salad\n- Never include tool names in the title (e.g. \"read tool\", \"bash tool\", \"edit tool\")\n- Focus on the main topic or question the user needs to retrieve\n- Vary your phrasing - avoid repetitive patterns like always starting with \"Analyzing\"\n- When a file is mentioned, focus on WHAT the user wants to do WITH the file, not just that they shared it\n- Keep exact: technical terms, numbers, filenames, HTTP codes\n- Remove: the, this, my, a, an\n- Never assume tech stack\n- Never use tools\n- NEVER respond to questions, just generate a title for the conversation\n- The title should NEVER include \"summarizing\" or \"generating\" when generating a title\n- DO NOT SAY YOU CANNOT GENERATE A TITLE OR COMPLAIN ABOUT THE INPUT\n- Alwa"
 
