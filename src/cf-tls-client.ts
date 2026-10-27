@@ -215,7 +215,8 @@ export async function cfCustomTlsFetch(rawUrl: string, init: RequestInit = {}): 
   const host = url.hostname
   const port = Number(url.port) || (url.protocol === 'http:' ? 80 : 443)
 
-  const rawSock = connectFn(`${host}:${port}`, { secureTransport: 'off' })
+  const rawSock = connectFn({ hostname: host, port }, { secureTransport: 'off' })
+  await rawSock.opened
   const duplex = bridgeSocketToDuplex(rawSock)
 
   const TLSSocket = (lemonTls as any).TLSSocket || (lemonTls as any).default?.TLSSocket

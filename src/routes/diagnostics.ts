@@ -21,6 +21,24 @@ export function registerDiagnosticsRoutes(app: Hono<{ Bindings: Env }>) {
     }
   })
 
+  // 测试 cloudflare:sockets 的原始 TCP 连通性
+  app.get('/api/test-socket-conn', async (c) => {
+    try {
+      const { connect } = await import('cloudflare:sockets')
+      const sock = connect({ hostname: 'opencode.ai', port: 443 })
+      const info = await sock.opened
+      await sock.close()
+      return c.json({
+        ok: true,
+        message: 'TCP socket to opencode.ai:443 connected successfully!',
+        remoteAddress: info?.remoteAddress,
+        localAddress: info?.localAddress,
+      })
+    } catch (err: any) {
+      return c.json({ ok: false, error: err.message, stack: err.stack }, 500)
+    }
+  })
+
   // 公开诊断端点：直接测试 Pages 原生 cloudflare:sockets TLS 握手，不设回退，暴露真实错误或响应
   app.get('/api/test-pages-tls-raw', async (c) => {
     try {
