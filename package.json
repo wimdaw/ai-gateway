@@ -3,16 +3,14 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "@cf-wasm/quickjs": "0.3.0",
     "@hono/node-server": "^2.1.1",
     "hono": "^4.12.27",
-    "parse5": "7.3.0",
     "postgres": "^3.4.9"
   },
   "scripts": {
-    "build": "npm run build:node",
-    "start": "node dist/server.js",
-    "build:node": "node scripts/build-node.mjs",
+    "build": "bun run build:node",
+    "start": "bun dist/bun-server.js",
+    "build:node": "bun scripts/build-node.mjs",
     "build:pages": "mkdir -p dist && cp -f index.html dist/index.html && echo \"{\\\"version\\\": 1, \\\"include\\\": [\\\"/*\\\"], \\\"exclude\\\": []}\" > dist/_routes.json && esbuild src/index.ts --bundle --format=esm --platform=neutral --target=es2022 --outfile=dist/_worker.js",
     "deploy:pages": "npm run build:pages && wrangler pages deploy dist --project-name ai-gateway"
   },

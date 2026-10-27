@@ -79,9 +79,29 @@ await esbuild.build({
   logLevel: 'warning',
 })
 
+// ── 2.5) 打包 Bun server（Koyeb 生产入口）───────────────────────────────────
+// 必须用 Bun 出网：opencode.ai 免费池门禁3 只认 Bun/BoringSSL 的 17-cipher
+// ClientHello，Node 的 OpenSSL 指纹一律 429。同一进程也承担 TLS 中继职责。
+await esbuild.build({
+  entryPoints: [join(root, 'src', 'bun.ts')],
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  target: 'node20',
+  inject: [join(root, 'src', 'polyfill.ts')],
+  outfile: join(dist, 'bun-server.js'),
+  define: {
+    __ASSET_CSS__: JSON.stringify(cssAsset.url),
+    __ASSET_SHARED_JS__: JSON.stringify(sharedAsset.url),
+    __ASSET_ADMIN_JS__: JSON.stringify(adminAsset.url),
+  },
+  logLevel: 'warning',
+})
+
 const kb = (n) => (n / 1024).toFixed(1) + ' KiB'
 console.log('资源   ' + cssAsset.url + '  ' + kb(cssAsset.bytes) + '  (原始 ' + kb(Buffer.byteLength(rawCss)) + ')')
 console.log('       ' + sharedAsset.url + '  ' + kb(sharedAsset.bytes))
 console.log('       ' + adminAsset.url + '  ' + kb(adminAsset.bytes) + '  (原始 ' + kb(Buffer.byteLength(rawAdmin)) + ')')
 console.log('server ' + kb(readFileSync(join(dist, 'server.js')).length))
+console.log('bun    ' + kb(readFileSync(join(dist, 'bun-server.js')).length))
 console.log('构建完成 -> ' + dist)

@@ -229,6 +229,10 @@ export interface Env {
   ADMIN_USERNAME?: string
   ADMIN_PASSWORD?: string
   OPENCODE_MIRRORS_URL?: string
+  /** 门禁3 TLS 中继地址（由跑在 Bun 上的节点代发 opencode.ai 请求）；为空则直连官方源站 */
+  OPENCODE_RELAY_URL?: string
+  /** TLS 中继鉴权令牌，未设时用代码内默认值 */
+  OPENCODE_RELAY_TOKEN?: string
   /** Antigravity OAuth 客户端凭据, 经 Worker 密钥下发(wrangler secret put), 不入库 */
   AG_CLIENT_ID?: string
   AG_CLIENT_SECRET?: string

@@ -49,7 +49,7 @@ import {
   startClineDeviceFlow, pollClineDeviceFlow, testCline, fetchClineModels, fetchClineKeyQuota,
 } from './cline'
 import { fetchZaiModels } from './zai'
-import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from './opencode'
+import { fetchOpenCodeModels, isOpenCodeProvider, resolveOpenCodeRelay, resolveOpenCodeUrls, resolveProviderMirrorUrls, testOpenCodeModel } from './opencode'
 import { PROXY_KEY_PREFIX, EXPIRY_OPTIONS, OPENCODE_DEFAULT_URL } from './config'
 import type {
   Env,
@@ -82,11 +82,10 @@ function normalizeArray<T>(
 /** 规范化 mirrorUrls: 接受数组或换行/逗号分隔字符串, 去空去重 */
 function normalizeMirrorUrls(value: unknown): string[] | undefined {
   if (value === undefined || value === null) return undefined
-  const rawParts = Array.isArray(value) ? value.map((v) => String(v)) : [String(value)]
-  // 每个条目内再按 真实换行 / 逗号 / 字面量反斜杠+n 切分：
-  // 备份导入等路径可能把多条 URL 塞进同一个数组元素，直接 trim 会拼出粘连的垃圾地址
-  const parts = rawParts.flatMap((s) => s.split(/\\n|[\n,]/)).map((s) => s.trim())
-  const cleaned = [...new Set(parts.filter(Boolean))]
+  const parts = Array.isArray(value)
+    ? value as string[]
+    : String(value).split('\n').flatMap(s => s.split(',')).map(s => s.trim())
+  const cleaned = [...new Set(parts.map(s => String(s).trim()).filter(Boolean))]
   return cleaned.length > 0 ? cleaned : undefined
 }
 
@@ -532,7 +531,7 @@ export async function handleTestModel(c: Context<{ Bindings: Env }>) {
   // 多 key 轮询测试：逐个 key 尝试，遇 429/401/403/5xx 自动切换下一个 key，避免误报限流
   const ptype = provider.type || 'openai'
   const result = isOpenCodeProvider(provider.id)
-    ? await testOpenCodeModel(provider.baseUrl, enabledKeys, modelId, resolveProviderMirrorUrls(c.env, provider))
+    ? await testOpenCodeModel(provider.baseUrl, enabledKeys, modelId, resolveProviderMirrorUrls(c.env, provider), undefined, resolveOpenCodeRelay(c.env))
     : ptype === 'antigravity'
       ? await testAntigravityRotating(c.env, enabledKeys.map(k => k.key), modelId, provider.project)
       : ['claude', 'codex', 'kimi', 'kimiweb', 'geminiweb', 'minimaxweb', 'lingxi', 'grok', 'qwen', 'deepseek', 'codebuddy', 'cline'].includes(ptype)
@@ -588,26 +587,6 @@ export async function handleTestKeyNew(c: Context<{ Bindings: Env }>) {
     })
   }
 
-  // Duck.ai 免 Key 渠道模型列表获取
-  if (providerType === 'duckai') {
-    const staticModels = [
-      { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
-      { id: 'gpt-5.4-mini', name: 'GPT-5.4 mini' },
-      { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
-      { id: 'mistral-small-2603', name: 'Mistral Small 4' },
-      { id: 'tinfoil/gpt-oss-120b', name: 'gpt-oss 120B' },
-      { id: 'tinfoil/gemma4-31b', name: 'Gemma 4 31B' }
-    ]
-    return c.json<ApiResponse>({
-      success: true,
-      data: {
-        success: true,
-        statusCode: 200,
-        data: { object: 'list', data: staticModels.map(m => ({ id: m.id, name: m.name, owned_by: 'duck.ai' })) }
-      }
-    })
-  }
-
   // Z.AI: 上游 /models 需有效 Key，这里回内置清单（供「获取模型」按钮使用）
   if (providerType === 'zai') {
     const models = fetchZaiModels().models
@@ -633,7 +612,7 @@ export async function handleTestKeyNew(c: Context<{ Bindings: Env }>) {
         })
       }
     }
-    const result = await fetchOpenCodeModels(url, [{ key: apiKey, enabled: true }], normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env))
+    const result = await fetchOpenCodeModels(url, [{ key: apiKey, enabled: true }], normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env), undefined, resolveOpenCodeRelay(c.env))
     return c.json<ApiResponse>({
       success: true,
       data: {
@@ -753,21 +732,13 @@ export async function handleTestModelNew(c: Context<{ Bindings: Env }>) {
     })
   }
 
-  // Duck.ai 测试模型连通性
-  if (providerType === 'duckai') {
-    return c.json<ApiResponse>({
-      success: true,
-      data: { success: true, statusCode: 200, message: 'Duck.ai 免费模型就绪' }
-    })
-  }
-
   if (!url || !model) {
     return c.json<ApiResponse>({ success: false, message: 'url、model 为必填项' }, 400)
   }
 
   if (providerId && isOpenCodeProvider(providerId)) {
     const apiKeys = apiKey ? [{ key: apiKey, enabled: true }] : []
-    const result = await testOpenCodeModel(url, apiKeys, model, normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env))
+    const result = await testOpenCodeModel(url, apiKeys, model, normalizeMirrorUrls(mirrorUrls) ?? resolveOpenCodeUrls(c.env), undefined, resolveOpenCodeRelay(c.env))
     return c.json<ApiResponse>({
       success: true,
       data: { success: result.success, statusCode: result.statusCode || 0, message: result.message },

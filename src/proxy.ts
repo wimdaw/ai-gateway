@@ -3,7 +3,7 @@ import { getProvider, getProviders } from './storage'
 import { getKV } from './storage-adapter'
 import { KV_KEYS, KEY_HEALTH_COOLDOWN_MS, KEY_HEALTH_MAX_FAILURES } from './config'
 import type { Env, ProxyRequestBody, UsageRecord } from './types'
-import { isOpenCodeProvider, proxyOpenCodeRequest, resolveOpenCodeUrls, resolveProviderMirrorUrls } from './opencode'
+import { isOpenCodeProvider, proxyOpenCodeRequest, resolveOpenCodeRelay, resolveOpenCodeUrls, resolveProviderMirrorUrls } from './opencode'
 import { addUsageRecord } from './storage'
 
 /** 从响应体提取 token 用量（OpenAI / Anthropic 兼容） */
@@ -33,30 +33,6 @@ function passthroughEventStream(response: Response): Response | null {
   headers.set('Content-Type', contentType)
   headers.set('Cache-Control', 'no-store')
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
-}
-
-/**
- * 只约束「等待上游响应头」阶段的超时。
- * 不能把 AbortSignal.timeout(60000) 直接挂在 fetch 上：该信号在 undici 中作用于
- * 整个请求生命周期（含响应体流式读取），会让持续超过 60 秒的 SSE 回复在生成中途断流。
- */
-function createHeadersTimeout(ms = 60000): { signal: AbortSignal; done: () => void } {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(new Error('上游 60 秒内未返回响应头')), ms)
-  return { signal: controller.signal, done: () => clearTimeout(timer) }
-}
-
-/**
- * 记录用量改为 waitUntil 异步执行：强一致存储写入（Blob/D1/PG）放在返回响应前
- * 会白白推迟首字节，叠加进平台 120 秒执行预算里。
- */
-function recordUsageLater(c: Context<{ Bindings: Env }>, record: UsageRecord): void {
-  const task = addUsageRecord(c.env, record).catch(() => {})
-  try {
-    c.executionCtx?.waitUntil(task)
-  } catch {
-    /* 无 executionCtx 的运行时忽略：task 已在后台执行且带 catch，不会产生未处理拒绝 */
-  }
 }
 
 /** 读取响应体（保留原始字节），返回 JSON 解析结果与原始 Response */
@@ -388,34 +364,6 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
 
     const providerType = provider.type || 'openai'
 
-    // ===== Duck.ai AI Chat 免 Key 反代 =====
-    if (providerType === 'duckai') {
-      const targetSubPath = subPath.replace(/^\//, '')
-      if (targetSubPath !== 'chat/completions') {
-        return c.json({
-          error: { message: `duckai 渠道暂不支持端点 /v1/${targetSubPath}`, type: 'invalid_request_error' },
-        }, 400)
-      }
-      const { handleDuckAiRequest } = await import('./duckai')
-      const response = await handleDuckAiRequest({
-        model: modelConfig.id,
-        messages: (body as any).messages,
-        stream: (body as any).stream === true,
-      })
-      const isStream = (response.headers.get('content-type') || '').includes('text/event-stream')
-      recordUsageLater(c, {
-        ts: new Date().toISOString(),
-        provider: providerId,
-        model: modelSafe,
-        token: maskedToken,
-        ok: response.ok,
-        status: response.status,
-        promptTokens: isStream ? 0 : Math.ceil(JSON.stringify((body as any).messages || '').length / 4),
-        completionTokens: 0,
-        latencyMs: Date.now() - startedAt,
-      })
-      return response
-    }
     // ===== Azure TTS 内置语音合成(无需 API Key, 参考 one-api-cf azure-tts-proxy) =====
     if (providerType === 'azure-tts' && subPath === 'audio/speech') {
       const { handleAzureTtsSpeech } = await import('./azure-tts')
@@ -445,7 +393,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
         completionTokens: 0,
         latencyMs: Date.now() - startedAt,
       }
-      recordUsageLater(c, record)
+      await addUsageRecord(c.env, record).catch(() => {})
       return audioResp
     }
 
@@ -470,7 +418,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
         completionTokens: 0,
         latencyMs: Date.now() - startedAt,
       }
-      recordUsageLater(c, record)
+      await addUsageRecord(c.env, record).catch(() => {})
       return videoResp
     }
 
@@ -640,10 +588,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
         search: url.search,
         body: forwardPayload as string,
         mirrorUrls: resolveProviderMirrorUrls(c.env, provider),
-        sessionId: c.req.header('x-opencode-session')
-          || c.req.header('x-opencode-session-id')
-          || c.req.header('x-session-affinity')
-          || c.req.header('x-session-id'),
+        relay: resolveOpenCodeRelay(c.env),
       })
       const headers = new Headers(response.headers)
       headers.set('Cache-Control', 'no-store')
@@ -664,7 +609,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
           completionTokens: 0,
           latencyMs: Date.now() - startedAt,
         }
-        recordUsageLater(c, record)
+        await addUsageRecord(c.env, record).catch(() => {})
         headers.delete('content-length')
         return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
       }
@@ -683,7 +628,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
         completionTokens,
         latencyMs: Date.now() - startedAt,
       }
-      recordUsageLater(c, record)
+      await addUsageRecord(c.env, record).catch(() => {})
       return new Response(responseBody, { status: response.status, statusText: response.statusText, headers })
     }
 
@@ -713,18 +658,12 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
         forwardHeaders['anthropic-version'] = '2023-06-01'
       }
       try {
-        const headersGuard = createHeadersTimeout()
-        let response: Response
-        try {
-          response = await fetch(forwardUrl, {
-            method: c.req.method,
-            headers: forwardHeaders,
-            body: forwardPayload,
-            signal: headersGuard.signal,
-          })
-        } finally {
-          headersGuard.done()
-        }
+        const response = await fetch(forwardUrl, {
+          method: c.req.method,
+          headers: forwardHeaders,
+          body: forwardPayload,
+          signal: AbortSignal.timeout(60000),
+        })
         // 流式响应直接透传，避免整段缓冲导致客户端长时间收不到数据而重连
         const passthrough = passthroughEventStream(response)
         if (passthrough) {
@@ -739,7 +678,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
             completionTokens: 0,
             latencyMs: Date.now() - startedAt,
           }
-          recordUsageLater(c, record)
+          await addUsageRecord(c.env, record).catch(() => {})
           return passthrough
         }
         // 读取 body 提取 usage 并记录
@@ -756,7 +695,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
           completionTokens,
           latencyMs: Date.now() - startedAt,
         }
-        recordUsageLater(c, record)
+        await addUsageRecord(c.env, record).catch(() => {})
         const responseHeaders: Record<string, string> = {
           'Content-Type': response.headers.get('Content-Type') || 'application/json',
           'Cache-Control': 'no-store',
@@ -838,18 +777,12 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
           forwardHeaders['Authorization'] = `Bearer ${apiKey}`
         }
 
-        const headersGuard = createHeadersTimeout()
-        let response: Response
-        try {
-          response = await fetch(forwardUrl, {
-            method: c.req.method,
-            headers: forwardHeaders,
-            body: forwardPayload,
-            signal: headersGuard.signal,
-          })
-        } finally {
-          headersGuard.done()
-        }
+        const response = await fetch(forwardUrl, {
+          method: c.req.method,
+          headers: forwardHeaders,
+          body: forwardPayload,
+          signal: AbortSignal.timeout(60000),
+        })
 
         if (response.ok) {
           // 成功：重置健康状态
@@ -873,7 +806,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
               completionTokens: 0,
               latencyMs: Date.now() - startedAt,
             }
-            recordUsageLater(c, record)
+            await addUsageRecord(c.env, record).catch(() => {})
             return passthrough
           }
 
@@ -891,7 +824,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
             completionTokens,
             latencyMs: Date.now() - startedAt,
           }
-          recordUsageLater(c, record)
+          await addUsageRecord(c.env, record).catch(() => {})
 
           const responseHeaders: Record<string, string> = {
             'Content-Type': response.headers.get('Content-Type') || 'application/json',

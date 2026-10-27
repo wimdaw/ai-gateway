@@ -4,7 +4,6 @@ import { logger } from 'hono/logger'
 import type { Env } from './types'
 import { adminAuthMiddleware, proxyKeyAuthMiddleware, handleLogin, handleLogout } from './auth'
 import { handleProxy, handleModels } from './proxy'
-import { withSseKeepAlive } from './sse-keepalive'
 import {
   handleStatus,
   handleGetProviders,
@@ -45,6 +44,7 @@ import {
   handleClineQuota,
 } from './admin'
 import { renderHomePage, renderLoginPage, renderAdminPage } from './pages'
+import { OPENCODE_RELAY_TOKEN_DEFAULT } from './opencode'
 import { probeDeepSeek, probeDeepSeekLogin } from './deepseek-auth-probe'
 import { seedInitialData, getSession } from './storage'
 import { ensureD1Tables, ensurePgTables } from './storage-adapter'
@@ -239,19 +239,62 @@ app.post('/admin/api/ds-probe/login', async (c) => {
 })
 app.post('/admin/api/backup/to-telegram', handleBackupToTelegram)
 
-// ===== API 转发路由（需转发 Key 验证） =====
-app.use('/v1/*', proxyKeyAuthMiddleware)
+// ===== OpenCode TLS 中继（供 Pages / EdgeOne 代发） =====
+// 免费池门禁3 校验 TLS ClientHello 必须是 Bun/BoringSSL 的 17-cipher 列表，
+// 而 CF Workers / EdgeOne 的出口 TLS 由平台自开，改不了；Koyeb 容器跑在 Bun 上，
+// 由这里用 Bun 原生 fetch 出网即可满足。请求头/体原样透传，响应流式回送。
+app.all('/__opencode_relay/*', async (c) => {
+  const expected = c.env.OPENCODE_RELAY_TOKEN || OPENCODE_RELAY_TOKEN_DEFAULT
+  if (c.req.header('x-opencode-relay-token') !== expected) {
+    return c.json({ error: { message: 'invalid relay token', type: 'relay_unauthorized' } }, 401)
+  }
 
-// SSE 响应统一加 keep-alive：静默期间注入 `: ping` 注释帧，防客户端与网关之间的
-// NAT/中间代理把长时间无数据的连接判死。仅处理 text/event-stream，其它响应原样放行。
-app.use('/v1/*', async (c, next) => {
-  await next()
-  const res = c.res
-  const contentType = res.headers.get('content-type') || ''
-  if (contentType.includes('text/event-stream') && res.body) {
-    c.res = withSseKeepAlive(res)
+  const url = new URL(c.req.url)
+  const subPath = url.pathname.replace(/^\/__opencode_relay/, '') || '/'
+  const target = 'https://opencode.ai/inference/openai/v1'
+    + (subPath.startsWith('/') ? subPath : '/' + subPath)
+    + url.search
+
+  const headers = new Headers()
+  for (const name of [
+    'content-type', 'authorization', 'user-agent', 'accept',
+    'x-opencode-client', 'x-opencode-project',
+    'x-opencode-session', 'x-opencode-session-id', 'x-session-affinity', 'x-session-id',
+    'typesafe-danger-zone-images',
+  ]) {
+    const value = c.req.header(name)
+    if (value) headers.set(name, value)
+  }
+
+  const body = c.req.method === 'GET' || c.req.method === 'HEAD'
+    ? undefined
+    : await c.req.arrayBuffer()
+
+  try {
+    const upstream = await fetch(target, {
+      method: c.req.method,
+      headers,
+      body,
+      signal: AbortSignal.timeout(300000),
+    })
+    const respHeaders = new Headers(upstream.headers)
+    // fetch 已解压，原 content-length/encoding 对下游是错的
+    respHeaders.delete('content-length')
+    respHeaders.delete('content-encoding')
+    return new Response(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: respHeaders,
+    })
+  } catch (err) {
+    return c.json({
+      error: { message: (err as Error).message || 'relay upstream failed', type: 'relay_upstream_failed' },
+    }, 502)
   }
 })
+
+// ===== API 转发路由（需转发 Key 验证） =====
+app.use('/v1/*', proxyKeyAuthMiddleware)
 app.get('/v1/models', handleModels)
 
 // OpenAI 兼容代理端点（全部透传转发，参考 one-api-cf 端点清单）
