@@ -3,6 +3,10 @@
     "maxDuration": 120,
     "regions": {
       "overseas": ["ap-tokyo"]
-    }
+    },
+    "externalNodeModules": [
+      "wreq-js",
+      "@wreq-js/binding-linux-x64-gnu"
+    ]
   }
 }

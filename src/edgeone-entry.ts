@@ -32,7 +32,7 @@ export async function onRequest(context: any) {
     ADMIN_USERNAME: process.env.ADMIN_USERNAME || 'admin',
     ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'yxy.@990524gdg',
     OPENCODE_MIRRORS_URL: process.env.OPENCODE_MIRRORS_URL,
-    OPENCODE_RELAY_URL: process.env.OPENCODE_RELAY_URL || context?.env?.OPENCODE_RELAY_URL || 'https://api-hackerxiaow-830602d5.koyeb.app/__opencode_relay',
+    OPENCODE_RELAY_URL: process.env.OPENCODE_RELAY_URL,
     AG_CLIENT_ID: process.env.AG_CLIENT_ID,
     AG_CLIENT_SECRET: process.env.AG_CLIENT_SECRET,
     ...process.env,

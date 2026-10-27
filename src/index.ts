@@ -4,7 +4,6 @@ import { logger } from 'hono/logger'
 import type { Env } from './types'
 import { adminAuthMiddleware, proxyKeyAuthMiddleware, handleLogin, handleLogout } from './auth'
 import { handleProxy, handleModels } from './llm-proxy'
-import { withSseKeepAlive } from './sse-keepalive'
 import {
   handleStatus,
   handleGetProviders,
@@ -111,6 +110,37 @@ app.get('/home', renderHome)
 app.get('/admin/login', async (c) => renderLoginPage(c))
 app.post('/admin/login', handleLogin)
 app.get('/admin/logout', handleLogout)
+
+// ===== 运行时能力探针：检测 Linux x64 原生 wreq-js 是否可用 =====
+app.get('/api/test-wreq', async (c) => {
+  try {
+    const wreq = await import('wreq-js')
+    const OPENCODE_CIPHER_LIST = [
+      'TLS_AES_128_GCM_SHA256', 'TLS_AES_256_GCM_SHA384', 'TLS_CHACHA20_POLY1305_SHA256',
+      'ECDHE-ECDSA-AES128-GCM-SHA256', 'ECDHE-RSA-AES128-GCM-SHA256',
+      'ECDHE-ECDSA-AES256-GCM-SHA384', 'ECDHE-RSA-AES256-GCM-SHA384',
+      'ECDHE-ECDSA-CHACHA20-POLY1305', 'ECDHE-RSA-CHACHA20-POLY1305',
+      'ECDHE-ECDSA-AES128-SHA', 'ECDHE-RSA-AES128-SHA',
+      'ECDHE-ECDSA-AES256-SHA', 'ECDHE-RSA-AES256-SHA',
+      'AES128-GCM-SHA256', 'AES256-GCM-SHA384', 'AES128-SHA', 'AES256-SHA',
+    ].join(':')
+    const transport = wreq.createTransport({
+      emulation: { tlsOptions: { cipherList: OPENCODE_CIPHER_LIST } },
+      readTimeout: 30000,
+    })
+    return c.json({
+      ok: true,
+      message: 'wreq-js (Linux x64 Rust TLS) successfully loaded inside EdgeOne runtime!',
+      hasTransport: Boolean(transport),
+    })
+  } catch (err) {
+    return c.json({
+      ok: false,
+      error: (err as Error).message,
+      stack: (err as Error).stack,
+    }, 500)
+  }
+})
 
 // ===== 静态资源（构建时内嵌进 bundle，immutable 一年期浏览器强缓存） =====
 // EdgeOne makers 部署模式没有 filesystem 静态服务，只能由云函数直接下发。
@@ -275,18 +305,6 @@ app.post('/admin/api/backup/to-telegram', handleBackupToTelegram)
 
 // ===== API 转发路由（需转发 Key 验证） =====
 app.use('/v1/*', proxyKeyAuthMiddleware)
-
-// SSE 响应统一加 keep-alive：静默期间注入 `: ping` 注释帧，防客户端与网关之间的
-// NAT/中间代理把长时间无数据的连接判死。仅处理 text/event-stream，其它响应原样放行。
-app.use('/v1/*', async (c, next) => {
-  await next()
-  const res = c.res
-  const contentType = res.headers.get('content-type') || ''
-  if (contentType.includes('text/event-stream') && res.body) {
-    c.res = withSseKeepAlive(res)
-  }
-})
-
 app.get('/v1/models', handleModels)
 
 // OpenAI 兼容代理端点（全部透传转发，参考 one-api-cf 端点清单）

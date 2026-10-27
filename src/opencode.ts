@@ -290,6 +290,46 @@ function transportErrorResponse(error: unknown): Response {
   })
 }
 
+const OPENCODE_CIPHER_LIST = [
+  'TLS_AES_128_GCM_SHA256',
+  'TLS_AES_256_GCM_SHA384',
+  'TLS_CHACHA20_POLY1305_SHA256',
+  'ECDHE-ECDSA-AES128-GCM-SHA256',
+  'ECDHE-RSA-AES128-GCM-SHA256',
+  'ECDHE-ECDSA-AES256-GCM-SHA384',
+  'ECDHE-RSA-AES256-GCM-SHA384',
+  'ECDHE-ECDSA-CHACHA20-POLY1305',
+  'ECDHE-RSA-CHACHA20-POLY1305',
+  'ECDHE-ECDSA-AES128-SHA',
+  'ECDHE-RSA-AES128-SHA',
+  'ECDHE-ECDSA-AES256-SHA',
+  'ECDHE-RSA-AES256-SHA',
+  'AES128-GCM-SHA256',
+  'AES256-GCM-SHA384',
+  'AES128-SHA',
+  'AES256-SHA',
+].join(':')
+
+let cachedWreq: any = null
+let cachedTransport: any = null
+
+async function getWreqModule() {
+  if (cachedWreq !== null) return cachedWreq
+  try {
+    const mod = await import('wreq-js')
+    const createTransport = mod.createTransport || mod.default?.createTransport
+    const fetchFn = mod.fetch || mod.default?.fetch
+    cachedTransport = await createTransport({
+      emulation: { tlsOptions: { cipherList: OPENCODE_CIPHER_LIST } },
+      readTimeout: 300000,
+    })
+    cachedWreq = { ...mod, createTransport, fetch: fetchFn }
+  } catch {
+    cachedWreq = false
+  }
+  return cachedWreq
+}
+
 async function requestUpstream(
   fetcher: typeof fetch,
   url: string,
@@ -298,6 +338,36 @@ async function requestUpstream(
   sessionId: string,
   relayToken?: string
 ): Promise<Response> {
+  const wreq = await getWreqModule()
+  if (wreq && !relayToken) {
+    // EdgeOne 原生模式：直接在 Node.js 20 容器内下发 Bun 17-cipher ClientHello 直连官方源站
+    const reqHeaders: Record<string, string> = {}
+    createRequestHeaders(apiKey, sessionId).forEach((val, key) => {
+      reqHeaders[key] = val
+    })
+    const upstream = await wreq.fetch(url, {
+      method: options.method,
+      headers: reqHeaders,
+      body: options.method === 'GET' || options.method === 'HEAD' ? undefined : options.body,
+      transport: cachedTransport,
+      timeout: OPENCODE_TIMEOUT_MS,
+    })
+    const respHeaders = new Headers()
+    if (upstream.headers && typeof upstream.headers.forEach === 'function') {
+      upstream.headers.forEach((val: string, key: string) => {
+        const lower = key.toLowerCase()
+        if (lower !== 'content-length' && lower !== 'content-encoding') {
+          respHeaders.set(key, val)
+        }
+      })
+    }
+    return new Response(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: respHeaders,
+    })
+  }
+
   return fetcher(url, {
     method: options.method,
     headers: createRequestHeaders(apiKey, sessionId, relayToken),

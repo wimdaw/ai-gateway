@@ -82,7 +82,7 @@ await esbuild.build({
   format: 'esm',
   platform: 'node',
   target: 'node20',
-  external: ['@edgeone/pages-blob'],
+  external: ['@edgeone/pages-blob', 'wreq-js', '@wreq-js/binding-linux-x64-gnu'],
   outfile: join(root, 'cloud-functions', '[[default]].js'),
   define: {
     __ASSET_CSS__: JSON.stringify(cssAsset.url),

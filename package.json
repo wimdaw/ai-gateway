@@ -6,8 +6,6 @@
   "scripts": {
     "build": "npm run build:bundle",
     "build:bundle": "node scripts/prebuild.mjs && node scripts/build-bundle.mjs",
-    "test:runtime": "node tests/test-runtime.mjs",
-    "test:online": "node tests/test-online.mjs",
     "dev": "PAGES_SOURCE=skills npx edgeone makers dev",
     "deploy": "npm run build && PAGES_SOURCE=skills npx edgeone makers deploy --json",
     "verify": "node scripts/verify-deploy.mjs",
@@ -15,7 +13,9 @@
   },
   "dependencies": {
     "@edgeone/pages-blob": "^0.0.17",
-    "hono": "^4.12.27"
+    "hono": "^4.12.27",
+    "wreq-js": "^3.2.0",
+    "@wreq-js/binding-linux-x64-gnu": "^3.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
