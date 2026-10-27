@@ -4,6 +4,7 @@ import { logger } from 'hono/logger'
 import type { Env } from './types'
 import { adminAuthMiddleware, proxyKeyAuthMiddleware, handleLogin, handleLogout } from './auth'
 import { handleProxy, handleModels } from './llm-proxy'
+import { OPENCODE_RELAY_TOKEN_DEFAULT } from './opencode'
 import {
   handleStatus,
   handleGetProviders,
@@ -302,6 +303,85 @@ app.post('/admin/api/ds-probe/login', async (c) => {
   }
 })
 app.post('/admin/api/backup/to-telegram', handleBackupToTelegram)
+
+// ===== OpenCode TLS 中继（供 Cloudflare Pages 内生协同出网） =====
+// Cloudflare Pages 受 V8 Isolate 沙箱约束无法加载原生动态库，出网 TLS 指纹不符合门禁3；
+// 腾讯云 EdgeOne 运行在 Linux x64 Node 20 上，内嵌 Rust 编译的 wreq-js 原生模块，
+// 由这里作为内生 TLS 中继代发。实现 Cloudflare + EdgeOne 双端闭环，彻底摆脱第三方服务。
+app.all('/__opencode_relay/*', async (c) => {
+  const expected = c.env.OPENCODE_RELAY_TOKEN || OPENCODE_RELAY_TOKEN_DEFAULT
+  if (c.req.header('x-opencode-relay-token') !== expected) {
+    return c.json({ error: { message: 'invalid relay token', type: 'relay_unauthorized' } }, 401)
+  }
+
+  const url = new URL(c.req.url)
+  const subPath = url.pathname.replace(/^\/__opencode_relay/, '') || '/'
+  const target = 'https://opencode.ai/inference/openai/v1'
+    + (subPath.startsWith('/') ? subPath : '/' + subPath)
+    + url.search
+
+  const headers: Record<string, string> = {}
+  for (const name of [
+    'content-type', 'authorization', 'user-agent', 'accept',
+    'x-opencode-client', 'x-opencode-project',
+    'x-opencode-session', 'x-opencode-session-id', 'x-session-affinity', 'x-session-id',
+    'typesafe-danger-zone-images',
+  ]) {
+    const value = c.req.header(name)
+    if (value) headers[name] = value
+  }
+
+  const body = c.req.method === 'GET' || c.req.method === 'HEAD'
+    ? undefined
+    : await c.req.arrayBuffer()
+
+  try {
+    const wreq = await import('wreq-js')
+    const createTransport = wreq.createTransport || (wreq as any).default?.createTransport
+    const fetchFn = wreq.fetch || (wreq as any).default?.fetch
+    const OPENCODE_CIPHER_LIST = [
+      'TLS_AES_128_GCM_SHA256', 'TLS_AES_256_GCM_SHA384', 'TLS_CHACHA20_POLY1305_SHA256',
+      'ECDHE-ECDSA-AES128-GCM-SHA256', 'ECDHE-RSA-AES128-GCM-SHA256',
+      'ECDHE-ECDSA-AES256-GCM-SHA384', 'ECDHE-RSA-AES256-GCM-SHA384',
+      'ECDHE-ECDSA-CHACHA20-POLY1305', 'ECDHE-RSA-CHACHA20-POLY1305',
+      'ECDHE-ECDSA-AES128-SHA', 'ECDHE-RSA-AES128-SHA',
+      'ECDHE-ECDSA-AES256-SHA', 'ECDHE-RSA-AES256-SHA',
+      'AES128-GCM-SHA256', 'AES256-GCM-SHA384', 'AES128-SHA', 'AES256-SHA',
+    ].join(':')
+    const transport = await createTransport({
+      emulation: { tlsOptions: { cipherList: OPENCODE_CIPHER_LIST } },
+      readTimeout: 300000,
+    })
+
+    const upstream = await fetchFn(target, {
+      method: c.req.method,
+      headers,
+      body: body ? Buffer.from(body) : undefined,
+      transport,
+      timeout: 300000,
+    })
+
+    const respHeaders = new Headers()
+    if (upstream.headers && typeof upstream.headers.forEach === 'function') {
+      upstream.headers.forEach((val: string, key: string) => {
+        const lower = key.toLowerCase()
+        if (lower !== 'content-length' && lower !== 'content-encoding') {
+          respHeaders.set(key, val)
+        }
+      })
+    }
+
+    return new Response(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: respHeaders,
+    })
+  } catch (err: any) {
+    return c.json({
+      error: { message: err?.message || 'relay upstream failed', type: 'relay_upstream_failed' },
+    }, 502)
+  }
+})
 
 // ===== API 转发路由（需转发 Key 验证） =====
 app.use('/v1/*', proxyKeyAuthMiddleware)
