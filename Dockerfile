@@ -5,7 +5,8 @@
 FROM oven/bun:1-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN bun install --no-frozen-lockfile
+# 移除历史残留 quickjs 导致的 lockfile 冲突，由 bun 按 package.json 全新解析
+RUN rm -f package-lock.json && bun install
 COPY . .
 RUN bun run build:node
 
@@ -13,8 +14,9 @@ FROM oven/bun:1-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8000
-COPY package*.json ./
-RUN bun install --production --no-frozen-lockfile
+COPY package.json ./
+# 直接复用 builder 阶段的依赖，无需二次 install
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 EXPOSE 8000
 CMD ["bun", "dist/bun-server.js"]
