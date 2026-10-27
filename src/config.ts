@@ -30,6 +30,7 @@ export const KV_KEYS = {
   KEY_HEALTH_PREFIX: 'key:health:',
   AG_HEALTH_PREFIX: 'ag:health:',
   OPENCODE_MIGRATION: 'migration:opencode-default:v1',
+  OPENCODE_MODELS_MIGRATION: 'migration:opencode-model-catalog:v2',
   USAGE_PREFIX: 'usage:req:',
 } as const
 

@@ -72,6 +72,7 @@ function d1KVImpl(db: D1Database): KVLike {
 function pgKVImpl(sql: any): KVLike {
   return {
     async get(key) {
+      if (!key) return null
       const rows = await sql`SELECT value, expires_at FROM kv_store WHERE key = ${key}`
       if (!rows || rows.length === 0) return null
       const res = rows[0]
@@ -83,6 +84,7 @@ function pgKVImpl(sql: any): KVLike {
       return res.value
     },
     async put(key, value, options) {
+      if (!key) return
       const expiresAt = options?.expirationTtl
         ? Math.floor(Date.now() / 1000) + options.expirationTtl
         : null
@@ -93,6 +95,7 @@ function pgKVImpl(sql: any): KVLike {
       `
     },
     async delete(key) {
+      if (!key) return
       await sql`DELETE FROM kv_store WHERE key = ${key}`
     },
     async list(options) {
