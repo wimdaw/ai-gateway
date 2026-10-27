@@ -11,6 +11,16 @@ import { probeDeepSeek, probeDeepSeekLogin } from '../deepseek-auth-probe'
 import { registerBackupToTelegramRoute } from './backup'
 
 export function registerDiagnosticsRoutes(app: Hono<{ Bindings: Env }>) {
+  // 抓取 Cloudflare Pages 原生 fetch 发出的真实 TLS 指纹（JA4、Ciphers、Extensions）
+  app.get('/api/test-tls-fp', async (c) => {
+    try {
+      const res = await fetch('https://tls.peet.ws/api/all')
+      return c.json(await res.json())
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500)
+    }
+  })
+
   // 公开诊断端点：直接测试 Pages 原生 cloudflare:sockets TLS 握手，不设回退，暴露真实错误或响应
   app.get('/api/test-pages-tls-raw', async (c) => {
     try {
