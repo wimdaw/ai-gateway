@@ -2,6 +2,7 @@ import type { ApiKeyEntry, Env } from './types'
 import {
   OPENCODE_COMPAT_HEAD,
   OPENCODE_COMPAT_TAIL,
+  OPENCODE_TITLE_MARKER,
   OPENCODE_CLI_MARKER,
   OPENCODE_OFFICIAL_TOOLS,
   buildOpenCodeEnvBlock,
