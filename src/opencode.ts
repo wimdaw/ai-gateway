@@ -298,21 +298,6 @@ async function requestUpstream(
   sessionId: string,
   relayToken?: string
 ): Promise<Response> {
-  // Cloudflare Pages 专属原生模式：通过 cloudflare:sockets 直连官方源站，
-  // 完全在 Worker 内部下发 Bun 17-cipher ClientHello 指纹，不需要外部中继。
-  if (!relayToken && /https?:\/\/opencode\.ai(?::\d+)?(?=\/|$)/i.test(url)) {
-    try {
-      const { cfCustomTlsFetch } = await import('./cf-tls-client')
-      return await cfCustomTlsFetch(url, {
-        method: options.method,
-        headers: createRequestHeaders(apiKey, sessionId),
-        body: options.method === 'GET' || options.method === 'HEAD' ? undefined : options.body,
-      })
-    } catch (err) {
-      console.warn('[Pages TLS] 原生 cloudflare:sockets TLS 失败，回退默认 fetch:', err)
-    }
-  }
-
   return fetcher(url, {
     method: options.method,
     headers: createRequestHeaders(apiKey, sessionId, relayToken),

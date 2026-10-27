@@ -3,8 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "hono": "^4.12.27",
-    "lemon-tls": "^0.10.0"
+    "hono": "^4.12.27"
   },
   "scripts": {
     "build": "node scripts/build.mjs",

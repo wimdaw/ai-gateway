@@ -77,7 +77,7 @@ await esbuild.build({
   format: 'esm',
   platform: 'neutral',
   target: 'es2022',
-  external: ['cloudflare:*', 'node:*', 'crypto', 'stream', 'buffer', 'net'],
+  external: ['cloudflare:*', 'node:*'],
   outfile: join(dist, '_worker.js'),
   define: {
     __ASSET_CSS__: JSON.stringify(cssAsset.url),
