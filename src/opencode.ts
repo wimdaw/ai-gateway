@@ -13,7 +13,7 @@ export const OPENCODE_PROVIDER_ID = 'opencode'
 // 2026-10 上游已切到 2.x 客户端，UA 格式从 `opencode/<version> ai-sdk/...` 改为
 // `opencode/<channel>/<version>/<name>`（channel=prod，name=cli），
 // 并新增 x-opencode-session-id / x-session-affinity / X-Session-Id 头、移除 x-opencode-request。
-const OPENCODE_VERSION = '2.0.29'
+const OPENCODE_VERSION = '2.1.4'
 const OPENCODE_CHANNEL = 'prod'
 // 免费层模型出字慢，流式响应可能持续数分钟；超时过短会在生成中途掐断连接，客户端表现为「重新连接」
 const OPENCODE_TIMEOUT_MS = 300000
@@ -57,6 +57,11 @@ function createOpenCodeId(prefix: string, descending = false): string {
   return `${prefix}_${hex}${randomBase62(14)}`
 }
 
+function resolveSessionId(candidate?: string): string {
+  const sessionId = candidate?.trim()
+  if (sessionId && /^ses_[0-9a-f]{12}[A-Za-z0-9]{14}$/.test(sessionId)) return sessionId
+  return createOpenCodeId('ses', true)
+}
 // 免费层内容闸门（详见 opencode-compat.ts）：system 必须含官方 prompt 片段，
 // 带 tools 的请求还要求 tools 以官方工具集开头。两个 marker 的注入块在此拼好。
 const OPENCODE_TITLE_BLOCK = `${OPENCODE_COMPAT_HEAD}\n${OPENCODE_TITLE_MARKER}\n${OPENCODE_COMPAT_TAIL}`
@@ -72,6 +77,7 @@ interface OpenCodeRequestOptions {
   body?: string
   fetcher?: typeof fetch
   random?: () => number
+  sessionId?: string
 }
 
 interface StoredFailure {
@@ -460,7 +466,7 @@ function formatOpenCodeErrorMessage(status: number, rawBody: string): string {
 export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Promise<Response> {
   const fetcher = options.fetcher ?? fetch
   const random = options.random ?? Math.random
-  const sessionId = createOpenCodeId('ses', true)
+  const sessionId = resolveSessionId(options.sessionId)
   let officialFailure: StoredFailure | null = null
   let mirrorFailure: StoredFailure | null = null
   let lastTransportError: unknown = null
