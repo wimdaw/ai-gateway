@@ -140,6 +140,7 @@ const OAUTH_DEFAULT_URLS = {
   zai: 'https://api.z.ai/api/coding/paas/v4', 
   codebuddy: 'https://copilot.tencent.com', 
   cline: 'https://api.cline.bot',
+  chatgptweb: 'https://chatgpt.com',
   kimiweb: 'https://www.kimi.ai',
   geminiweb: 'https://gemini.google.com',
   minimaxweb: 'https://agent.minimaxi.com',
@@ -151,6 +152,7 @@ function isKimiWebType(t) { return t === 'kimiweb' }
 function isGeminiWebType(t) { return t === 'geminiweb' }
 function isMiniMaxWebType(t) { return t === 'minimaxweb' }
 function isLingxiType(t) { return t === 'lingxi' }
+function isChatgptWebType(t) { return t === 'chatgptweb' }
 function isZaiType(t) { return t === 'zai' }
 function isCodebuddyType(t) { return t === 'codebuddy' }
 
@@ -196,7 +198,8 @@ function onTypeChange(sel, id) {
       : sel.value === 'azure-tts' ? '内置免费语音合成, 无需 API Key。'
       : sel.value === 'antigravity' ? 'Antigravity 反代: 点「用 Google 账号授权」获取 refresh_token, 请求自动翻译成 Gemini 协议。支持多账号(一行一个)。'
       : sel.value === 'claude' ? 'Claude OAuth 反代: 授权登录获取 refresh_token, 请求自动翻译成 Anthropic Messages 协议。'
-      : sel.value === 'codex' ? 'ChatGPT (Codex) 反代: 授权登录获取 refresh_token, 请求自动翻译成 Responses 协议。'
+      : sel.value === 'codex' ? 'ChatGPT (Codex) 反代: 授权登录获取 refresh_token；API Keys 也支持直接粘贴 CPA JSON（单行）或「账号----GPT密码----邮箱密码----rt」发货行，网关自动提取 refresh_token。'
+      : sel.value === 'chatgptweb' ? 'ChatGPT 网页版反代: API Keys 一行一个账号，可直接粘贴发货整行「账号----GPT密码----邮箱密码----rt.1.xxx」（自动取最后一段），也可只填 rt.1.xxx / rt_xxx；走网页 conversation，不能用于 Codex。'
       : sel.value === 'kimi' ? 'Kimi 反代: 设备码授权获取 refresh_token, OpenAI 兼容直通。'
       : sel.value === 'grok' ? 'Grok (xAI) 反代: 设备码授权获取 refresh_token, 请求自动翻译成 Responses 协议。'
       : sel.value === 'qwen' ? 'Qwen 反代: 设备码授权获取 refresh_token, OpenAI 兼容直通。'
@@ -214,21 +217,21 @@ function onTypeChange(sel, id) {
   if (id === 'new') {
     const url = document.getElementById('aurl')
     if (url) {
-      url.disabled = isTts || isAg || (isOa && !isCb) || isDs
+      url.disabled = isTts || isAg || (isOa && !isCb) || isDs || isChatgptWebType(sel.value)
       if (isTts) url.value = ''
       else if (isAg) url.value = 'https://daily-cloudcode-pa.googleapis.com'
       else if (isCb) url.value = cbRegionUrl('new')
-      else if (isOa || isDs) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
+      else if (isOa || isDs || isChatgptWebType(sel.value)) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
       else if (isZai) url.value = OAUTH_DEFAULT_URLS.zai
       else if (!url.value) url.value = 'https://'
     }
   } else {
     const url = document.getElementById('url-' + id)
     if (url) {
-      url.disabled = isTts || isAg || (isOa && !isCb) || isDs
+      url.disabled = isTts || isAg || (isOa && !isCb) || isDs || isChatgptWebType(sel.value)
       if (isAg && !url.value) url.value = 'https://daily-cloudcode-pa.googleapis.com'
       if (isCb && !url.value) url.value = cbRegionUrl(id)
-      if ((isOa && !isCb || isDs) && !url.value) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
+      if ((isOa && !isCb || isDs || isChatgptWebType(sel.value)) && !url.value) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
       if (isZai && !url.value) url.value = OAUTH_DEFAULT_URLS.zai
       if (isTts && !url.dataset.orig) url.dataset.orig = url.value
     }
@@ -1119,7 +1122,7 @@ async function createProv() {
   if (!url && type === 'antigravity') url = 'https://daily-cloudcode-pa.googleapis.com'
   if (!url && type === 'vertex') url = 'https://aiplatform.googleapis.com'
   if (!url && type === 'devin') url = 'https://server.codeium.com'
-  if (!url && (isOauthType(type) || isDeepseekType(type) || isZaiType(type) || isKimiWebType(type) || isGeminiWebType(type) || isMiniMaxWebType(type) || isLingxiType(type))) url = OAUTH_DEFAULT_URLS[type] || ''
+  if (!url && (isOauthType(type) || isDeepseekType(type) || isZaiType(type) || isKimiWebType(type) || isGeminiWebType(type) || isMiniMaxWebType(type) || isLingxiType(type) || isChatgptWebType(type))) url = OAUTH_DEFAULT_URLS[type] || ''
   if (!url && !isTts) { toast('请填写 API 地址', 'error'); return }
 
   let keys = Array.from(document.querySelectorAll('#akeys .field-row')).map(r => {
@@ -1331,7 +1334,7 @@ async function save(id) {
   if (!url && type === 'antigravity') url = 'https://daily-cloudcode-pa.googleapis.com'
   if (!url && type === 'vertex') url = 'https://aiplatform.googleapis.com'
   if (!url && type === 'devin') url = 'https://server.codeium.com'
-  if (!url && (isOauthType(type) || isDeepseekType(type) || isZaiType(type) || isKimiWebType(type) || isGeminiWebType(type) || isMiniMaxWebType(type) || isLingxiType(type))) url = OAUTH_DEFAULT_URLS[type] || ''
+  if (!url && (isOauthType(type) || isDeepseekType(type) || isZaiType(type) || isKimiWebType(type) || isGeminiWebType(type) || isMiniMaxWebType(type) || isLingxiType(type) || isChatgptWebType(type))) url = OAUTH_DEFAULT_URLS[type] || ''
   let keys = getKeys(id)
   const vxKeys = type === 'vertex' ? provVertexKeys(id) : null
   if (vxKeys && vxKeys.length) keys = vxKeys.map(k => ({ key: k, enabled: true }))
