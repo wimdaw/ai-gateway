@@ -1,18 +1,29 @@
 /**
- * 静态资源 URL（构建时由 esbuild --define 注入带内容哈希的文件名）。
+ * 静态资源 URL（构建时由 esbuild --define 注入带内容哈希的文件名，见 scripts/build-bundle.mjs）。
  *
  * 为什么不再内联 CSS/JS：
- *  1. 内联意味着每个页面、每次访问都要重传同一份 50 KiB CSS（三个页面完全重复）；
- *  2. 外链文件可被浏览器与 Cloudflare 边缘缓存，配 `immutable` 后重复访问零传输；
- *  3. worker 包也因此不再包含这些字符串，冷启动更快。
- *
- * 文件名带内容哈希，所以可以放心用一年期强缓存：内容一变文件名就变。
- * 构建脚本见 scripts/build.mjs —— 它负责抽内容、压缩、算哈希并注入这三个常量。
+ *   1. 管理页 HTML 是 no-store 的，内联意味着每次进后台都要重传同一份 CSS/脚本（合计约 120KB）；
+ *   2. 外链文件落在项目 assets/ 目录，由平台 filesystem（CDN 边缘）直接服务，可长期缓存；
+ *   3. 未注入 define 的构建路径回退为空串，页面模板自动改回内联，保证任何构建方式都能跑。
  */
-declare const __ASSET_CSS__: string
-declare const __ASSET_SHARED_JS__: string
-declare const __ASSET_ADMIN_JS__: string
+declare const __ASSET_CSS__: string | undefined
+declare const __ASSET_SHARED_JS__: string | undefined
+declare const __ASSET_ADMIN_JS__: string | undefined
 
-export const ASSET_CSS: string = __ASSET_CSS__
-export const ASSET_SHARED_JS: string = __ASSET_SHARED_JS__
-export const ASSET_ADMIN_JS: string = __ASSET_ADMIN_JS__
+export const ASSET_CSS: string = typeof __ASSET_CSS__ !== 'undefined' ? __ASSET_CSS__ : ''
+export const ASSET_SHARED_JS: string = typeof __ASSET_SHARED_JS__ !== 'undefined' ? __ASSET_SHARED_JS__ : ''
+export const ASSET_ADMIN_JS: string = typeof __ASSET_ADMIN_JS__ !== 'undefined' ? __ASSET_ADMIN_JS__ : ''
+
+/** 样式注入：有外链文件用 <link>（可缓存），否则回退内联 */
+export function cssTag(fallbackCss: string): string {
+  return ASSET_CSS
+    ? `<link rel="stylesheet" href="${ASSET_CSS}">`
+    : `<style>${fallbackCss}</style>`
+}
+
+/** 脚本注入：有外链文件用 <script src>，否则回退内联（保留顶层函数名，页面大量内联 onclick 依赖它们） */
+export function scriptTag(url: string, inlineJs: string): string {
+  return url
+    ? `<script src="${url}"></script>`
+    : `<script>${inlineJs}</script>`
+}

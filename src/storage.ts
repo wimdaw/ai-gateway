@@ -1,27 +1,55 @@
 import { KV_KEYS } from './config'
 import type { Env, Provider, ProxyKey, Session } from './types'
-import { getKV, addUsageRecordD1 } from './storage-adapter'
+import { getKV, addUsageRecordBlob, getUsageSummaryBlob } from './storage-adapter'
 
 // ===== 提供商 CRUD =====
 
 // 进程内缓存: providers 可达 MB 级(万级 Key), 每次请求都远端读取+解析代价过高。
 // 但缓存必须带过期时间: 该变量是 isolate 级的, 管理端在 A isolate 改完渠道后,
 // B isolate 会一直沿用旧列表 —— 实测在部署切换期出现过「刚创建的渠道在另一个
-// isolate 上查不到 / 删除返回 404」。30s TTL 把不一致窗口收敛到可接受范围,
-// 同时每个 isolate 最多每 30s 读一次存储, 开销可忽略。
+// isolate 上查不到 / 删除返回 404」。30s TTL 把不一致窗口收敛到可接受范围。
 const PROVIDERS_CACHE_TTL_MS = 30_000
 
 let providersCache: Provider[] | null = null
 let providersCacheAt = 0
+let providersRefreshing = false
 
 export async function getProviders(env: Env): Promise<Provider[]> {
   const now = Date.now()
   if (providersCache && now - providersCacheAt < PROVIDERS_CACHE_TTL_MS) return providersCache
+  // stale-while-revalidate: 缓存过期时先返回旧数据, 后台静默刷新。
+  // 一次全量读取是 MB 级 JSON(万级 Key), 同步等待会把后台页/代理请求的
+  // TTFB 拖高数秒; 改造后只有 isolate 冷启动后的第一个请求才同步读一次。
+  // 写路径(readProvidersFresh)依旧强制直读, 多 isolate 一致性窗口不变。
+  if (providersCache) {
+    if (!providersRefreshing) {
+      providersRefreshing = true
+      getKV(env).get(KV_KEYS.PROVIDERS)
+        .then((data) => {
+          providersCache = data ? (JSON.parse(data) as Provider[]) : []
+          providersCacheAt = Date.now()
+        })
+        .catch(() => {})
+        .finally(() => { providersRefreshing = false })
+    }
+    return providersCache
+  }
   const data = await getKV(env).get(KV_KEYS.PROVIDERS)
-  // 显式标注局部类型：JSON.parse 返回 any，直接赋值会把上面的缓存变量重新放宽成 Provider[] | null
   const parsed: Provider[] = data ? (JSON.parse(data) as Provider[]) : []
   providersCache = parsed
   providersCacheAt = now
+  return parsed
+}
+
+/**
+ * 供「读-改-写」使用的强制新鲜读取：必须绕过缓存。
+ * 否则别的 isolate 刚写入的渠道会被本次写回整条覆盖掉。
+ */
+async function readProvidersFresh(env: Env): Promise<Provider[]> {
+  const data = await getKV(env).get(KV_KEYS.PROVIDERS)
+  const parsed: Provider[] = data ? (JSON.parse(data) as Provider[]) : []
+  providersCache = parsed
+  providersCacheAt = Date.now()
   return parsed
 }
 
@@ -34,22 +62,6 @@ export async function setProviders(env: Env, providers: Provider[]): Promise<voi
   providersCache = providers
   providersCacheAt = Date.now()
   await getKV(env).put(KV_KEYS.PROVIDERS, JSON.stringify(providers))
-}
-
-/**
- * 供「读-改-写」使用的强制新鲜读取：必须绕过 isolate 缓存。
- *
- * 所有渠道写操作都是「读全量 → 改 → 写回」。若读的是 isolate 缓存，
- * 而这份缓存在别的 isolate 刚写完、尚未过期，写回就会把对方的改动**整条覆盖掉**。
- * 实测：A isolate 新建渠道后，B isolate 的删除操作按旧列表写回，新渠道一度被冲掉。
- * 因此写路径一律读最新值；读路径仍走缓存，热路径性能不受影响。
- */
-async function readProvidersFresh(env: Env): Promise<Provider[]> {
-  const data = await getKV(env).get(KV_KEYS.PROVIDERS)
-  const parsed: Provider[] = data ? (JSON.parse(data) as Provider[]) : []
-  providersCache = parsed
-  providersCacheAt = Date.now()
-  return parsed
 }
 
 export async function addProvider(env: Env, provider: Provider): Promise<void> {
@@ -195,7 +207,8 @@ import { USAGE_RETENTION_DAYS } from './config'
 import type { UsageRecord, UsageSummary } from './types'
 
 export async function seedInitialData(env: Env): Promise<void> {
-  const providers = await getProviders(env)
+  // 同样是「读-改-写」：必须读最新值，否则会把别的 isolate 的改动覆盖掉
+  const providers = await readProvidersFresh(env)
   const migrationCompleted = await getKV(env).get(KV_KEYS.OPENCODE_MIGRATION)
   const opencode = DEFAULT_PROVIDERS.find((provider) => provider.id === 'opencode')
 
@@ -231,153 +244,12 @@ export async function seedInitialData(env: Env): Promise<void> {
 
 // ===== Token 用量统计 =====
 
-/** 写入一条用量记录（直接基于 D1：独立行 + SQL 聚合；旧版 KV 回退已废弃：独立 key + TTL） */
+/** 写入一条用量记录（基于 EdgeOne Blob 存储） */
 export async function addUsageRecord(env: Env, record: UsageRecord): Promise<void> {
-  if (env.DB) {
-    await addUsageRecordD1(env.DB, record)
-    return
-  }
-  const date = record.ts.slice(0, 10)
-  const key = `${KV_KEYS.USAGE_PREFIX}${date}:${crypto.randomUUID()}`
-  await getKV(env).put(key, JSON.stringify(record), {
-    expirationTtl: USAGE_RETENTION_DAYS * 24 * 60 * 60,
-  }).catch(() => {})
+  await addUsageRecordBlob(env, record)
 }
 
-/** 按前缀分页读取所有用量记录 */
-async function listUsageRecords(env: Env, prefix: string): Promise<UsageRecord[]> {
-  const records: UsageRecord[] = []
-  let cursor: string | undefined
-  for (let i = 0; i < 50; i++) {
-    const page = await getKV(env).list({ prefix, cursor })
-    for (const k of page.keys) {
-      const raw = await getKV(env).get(k.name).catch(() => null)
-      if (!raw) continue
-      try {
-        records.push(JSON.parse(raw) as UsageRecord)
-      } catch { /* skip corrupt */ }
-    }
-    if (page.list_complete) break
-    cursor = (page as { cursor?: string }).cursor
-  }
-  return records
-}
-
-/** 聚合最近 N 天的用量（含当天）—— 直接基于 D1：SQL 直接聚合 */
+/** 聚合最近 N 天的用量（基于 EdgeOne Blob 存储） */
 export async function getUsageSummary(env: Env, days: number): Promise<UsageSummary> {
-  if (env.DB) {
-    return await getUsageSummaryD1(env.DB, days)
-  }
-  // 旧版 KV 回退已废弃 实现：按前缀聚合（KV 记录带 TTL 自动过期）
-  const prefixes: string[] = []
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86400000)
-    prefixes.push(`${KV_KEYS.USAGE_PREFIX}${d.toISOString().slice(0, 10)}:`)
-  }
-
-  const records: UsageRecord[] = []
-  for (const p of prefixes) {
-    records.push(...(await listUsageRecords(env, p)))
-  }
-
-  const byModel = new Map<string, UsageRecord[]>()
-  const byProvider = new Map<string, UsageRecord[]>()
-  const daily = new Map<string, UsageRecord[]>()
-
-  for (const r of records) {
-    const date = r.ts.slice(0, 10)
-    // 显示用模型名: 去掉 :free / /free / -free 后缀(与 alias 规则一致)
-    const displayModel = (r.model || '').replace(/[:\/\-]free$/i, '') || r.model || 'unknown'
-    if (!byModel.has(displayModel)) byModel.set(displayModel, [])
-    byModel.get(displayModel)!.push(r)
-    if (!byProvider.has(r.provider)) byProvider.set(r.provider, [])
-    byProvider.get(r.provider)!.push(r)
-    if (!daily.has(date)) daily.set(date, [])
-    daily.get(date)!.push(r)
-  }
-
-  const agg = (list: UsageRecord[]) => ({
-    requests: list.length,
-    promptTokens: list.reduce((s, r) => s + (r.promptTokens || 0), 0),
-    completionTokens: list.reduce((s, r) => s + (r.completionTokens || 0), 0),
-  })
-
-  const byModelArr = Array.from(byModel.entries())
-    .map(([model, list]) => ({ model, ...agg(list) }))
-    .sort((a, b) => b.requests - a.requests)
-  const byProviderArr = Array.from(byProvider.entries())
-    .map(([provider, list]) => ({ provider, ...agg(list) }))
-    .sort((a, b) => b.requests - a.requests)
-  const dailyArr = Array.from(daily.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([date, list]) => ({ date, ...agg(list) }))
-
-  const totalRequests = records.length
-  const successRequests = records.filter((r) => r.ok).length
-  const latencies = records.map((r) => r.latencyMs || 0)
-  const avgLatencyMs = totalRequests > 0
-    ? Math.round(latencies.reduce((s, v) => s + v, 0) / totalRequests)
-    : 0
-
-  return {
-    days,
-    totalRequests,
-    successRequests,
-    totalPromptTokens: records.reduce((s, r) => s + (r.promptTokens || 0), 0),
-    totalCompletionTokens: records.reduce((s, r) => s + (r.completionTokens || 0), 0),
-    avgLatencyMs,
-    byModel: byModelArr,
-    byProvider: byProviderArr,
-    daily: dailyArr,
-  }
-}
-
-/** D1 版用量聚合：SQL 一次查出全部聚合结果 */
-async function getUsageSummaryD1(db: D1Database, days: number): Promise<UsageSummary> {
-  const since = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10) + 'T00:00:00.000Z'
-
-  const total = await db.prepare(
-    'SELECT COUNT(*) AS cnt, SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS okCnt, COALESCE(SUM(prompt_tokens), 0) AS pt, COALESCE(SUM(completion_tokens), 0) AS ct, COALESCE(AVG(latency_ms), 0) AS lat FROM usage_records WHERE ts >= ?'
-  ).bind(since).first<{ cnt: number; okCnt: number; pt: number; ct: number; lat: number }>()
-
-  const byModel = await db.prepare(
-    `SELECT CASE WHEN model LIKE '%-free' OR model LIKE '%:free' OR model LIKE '%/free' THEN substr(model, 1, length(model) - 5) ELSE model END AS model, COUNT(*) AS cnt, COALESCE(SUM(prompt_tokens), 0) AS pt, COALESCE(SUM(completion_tokens), 0) AS ct FROM usage_records WHERE ts >= ? GROUP BY CASE WHEN model LIKE '%-free' OR model LIKE '%:free' OR model LIKE '%/free' THEN substr(model, 1, length(model) - 5) ELSE model END ORDER BY cnt DESC LIMIT 50`
-  ).bind(since).all<{ model: string; cnt: number; pt: number; ct: number }>()
-
-  const byProvider = await db.prepare(
-    'SELECT provider, COUNT(*) AS cnt, COALESCE(SUM(prompt_tokens), 0) AS pt, COALESCE(SUM(completion_tokens), 0) AS ct FROM usage_records WHERE ts >= ? GROUP BY provider ORDER BY cnt DESC LIMIT 50'
-  ).bind(since).all<{ provider: string; cnt: number; pt: number; ct: number }>()
-
-  const daily = await db.prepare(
-    "SELECT substr(ts, 1, 10) AS date, COUNT(*) AS cnt, COALESCE(SUM(prompt_tokens), 0) AS pt, COALESCE(SUM(completion_tokens), 0) AS ct FROM usage_records WHERE ts >= ? GROUP BY substr(ts, 1, 10) ORDER BY date"
-  ).bind(since).all<{ date: string; cnt: number; pt: number; ct: number }>()
-
-  const totalRequests = Number(total?.cnt || 0)
-  const successRequests = Number(total?.okCnt || 0)
-  return {
-    days,
-    totalRequests,
-    successRequests,
-    totalPromptTokens: Number(total?.pt || 0),
-    totalCompletionTokens: Number(total?.ct || 0),
-    avgLatencyMs: totalRequests > 0 ? Math.round(Number(total?.lat || 0)) : 0,
-    byModel: (byModel.results || []).map((r) => ({
-      model: r.model,
-      requests: Number(r.cnt),
-      promptTokens: Number(r.pt),
-      completionTokens: Number(r.ct),
-    })),
-    byProvider: (byProvider.results || []).map((r) => ({
-      provider: r.provider,
-      requests: Number(r.cnt),
-      promptTokens: Number(r.pt),
-      completionTokens: Number(r.ct),
-    })),
-    daily: (daily.results || []).map((r) => ({
-      date: r.date,
-      requests: Number(r.cnt),
-      promptTokens: Number(r.pt),
-      completionTokens: Number(r.ct),
-    })),
-  }
+  return await getUsageSummaryBlob(env, days)
 }

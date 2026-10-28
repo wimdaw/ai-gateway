@@ -3,17 +3,17 @@ import { getProviders, getProxyKeys } from './storage'
 import { getCodexUpstreamRelay } from './codex'
 import { SITE_CONFIG, OPENCODE_DEFAULT_URL } from './config'
 import type { Env, Provider } from './types'
-import { ASSET_ADMIN_JS, ASSET_CSS, ASSET_SHARED_JS } from './assets'
-import { CLIENT_DYNAMIC_ICONS, icon, renderSiteFooter, withIconSprite } from './shared.js'
+import { CSS_CONTENT } from './pages.css'
+import { cssTag, scriptTag, ASSET_SHARED_JS, ASSET_ADMIN_JS } from './assets'
+import { getExternalOrigin } from './request-utils'
+import { CLIENT_DYNAMIC_ICONS, icon, SHARED_JS, renderSiteFooter, withIconSprite } from './shared.js'
 import { storageTypeLabel } from './storage-adapter'
 import { AZURE_TTS_VOICES, voiceGroup } from './azure-voices'
+import { ADMIN_CLIENT_SCRIPT } from './admin.script'
 import { getTgConfig } from './backup'
 
-function getPlatformLabel(env: any, host?: string): string {
-  const isWorker = typeof host === 'string' && host.includes('workers.dev')
-  const platform = isWorker ? 'Workers' : 'Pages'
-  const storage = env?.DB ? 'D1' : env?.KV ? 'KV' : 'Memory'
-  return `${platform} · ${storage}`
+function getPlatformLabel(_env: any, _host?: string): string {
+  return 'EdgeOne · Blob'
 }
 
 const AZURE_VOICE_OPTIONS = (() => {
@@ -56,27 +56,17 @@ const H = (title: string) => `
   <meta name="theme-color" content="#f8fafc">
   <title>${title} — ${SITE_CONFIG.title}</title>
   <link rel="icon" href="${SITE_CONFIG.favicon}">
-  <link rel="stylesheet" href="${ASSET_CSS}">
+  ${cssTag(CSS_CONTENT)}
 </head>`
 
 /**
  * 单个渠道的编辑面板（页面上默认折叠）。
  *
- * 这一块是整页里最大的一块：14 个渠道的完整表单（模型行 / Key 行 / 按钮 / 图标）
+ * 这一块是整页最大的一块：全部渠道的完整表单（模型行 / Key 行 / 按钮 / 图标）
  * 全量渲染出来有数百 KiB，而用户通常只会展开其中一两个。
  * 因此改为按需渲染：列表页只输出摘要，首次展开时才向
  * GET /admin/api/providers/:id/panel 取这一段 HTML。
  */
-/** 轻量内容哈希，用作 ETag（只做缓存校验，不需要密码学强度） */
-function contentTag(input: string): string {
-  let h = 0x811c9dc5
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i)
-    h = Math.imul(h, 0x01000193) >>> 0
-  }
-  return h.toString(36)
-}
-
 export function renderProviderPanel(p: Provider): string {
   return `
   <div class="detail-heading">
@@ -88,7 +78,7 @@ export function renderProviderPanel(p: Provider): string {
     <div class="fg"><label>渠道名称</label><input type="text" id="nm-${escapePageHtml(p.id)}" value="${escapePageHtml(p.name)}"></div>
     <div class="fg"><label>渠道 ID</label><input type="text" id="pid-${escapePageHtml(p.id)}" value="${escapePageHtml(p.id)}"></div>
   </div>
-  <div class="fg"><label>API 地址</label><input type="url" id="url-${escapePageHtml(p.id)}" value="${escapePageHtml(p.baseUrl)}" ${(p.type || 'openai') === 'azure-tts' ? 'disabled placeholder="Azure TTS 为内置服务，无需地址"' : p.type === 'duckai' ? 'disabled placeholder="Duck.ai 上游地址固定"' : ''}></div>
+  <div class="fg"><label>API 地址</label><input type="url" id="url-${escapePageHtml(p.id)}" value="${escapePageHtml(p.baseUrl)}" ${(p.type || 'openai') === 'azure-tts' ? 'disabled placeholder="Azure TTS 为内置服务，无需地址"' : ''}></div>
   <div class="fr">
     <div class="fg"><label>渠道类型</label>
       <select id="pt-${escapePageHtml(p.id)}" class="select-sm" onchange="onTypeChange(this, '${escapePageHtml(p.id)}')">
@@ -100,12 +90,12 @@ export function renderProviderPanel(p: Provider): string {
         <option value="antigravity" ${p.type === 'antigravity' ? 'selected' : ''}>Antigravity 反代</option>
         <option value="claude" ${p.type === 'claude' ? 'selected' : ''}>Claude OAuth 反代</option>
         <option value="codex" ${p.type === 'codex' ? 'selected' : ''}>ChatGPT (Codex) 反代</option>
+        <option value="chatgptweb" ${p.type === 'chatgptweb' ? 'selected' : ''}>ChatGPT 网页版反代 (Free/RT)</option>
         <option value="kimi" ${p.type === 'kimi' ? 'selected' : ''}>Kimi Coding OAuth 反代</option>
         <option value="kimiweb" ${p.type === 'kimiweb' ? 'selected' : ''}>Kimi 网页版反代 (kimi.ai)</option>
         <option value="geminiweb" ${p.type === 'geminiweb' ? 'selected' : ''}>Gemini 网页版反代 (Cookie)</option>
         <option value="minimaxweb" ${p.type === 'minimaxweb' ? 'selected' : ''}>MiniMax 网页版反代 (Token)</option>
         <option value="lingxi" ${p.type === 'lingxi' ? 'selected' : ''}>中国移动灵犀反代 (Cookie)</option>
-        <option value="duckai" ${p.type === 'duckai' ? 'selected' : ''}>Duck.ai AI Chat (免 Key)</option>
         <option value="grok" ${p.type === 'grok' ? 'selected' : ''}>Grok OAuth 反代</option>
         <option value="qwen" ${p.type === 'qwen' ? 'selected' : ''}>Qwen OAuth 反代</option>
         <option value="deepseek" ${p.type === 'deepseek' ? 'selected' : ''}>DeepSeek 反代</option>
@@ -114,6 +104,7 @@ export function renderProviderPanel(p: Provider): string {
         <option value="zai" ${p.type === 'zai' ? 'selected' : ''}>Z.AI (GLM 国际)</option>
         <option value="codebuddy" ${p.type === 'codebuddy' ? 'selected' : ''}>CodeBuddy (腾讯) 反代</option>
         <option value="cline" ${p.type === 'cline' ? 'selected' : ''}>Cline 反代</option>
+        <option value="duckai" ${p.type === 'duckai' ? 'selected' : ''}>Duck.ai 免 Key 聊天</option>
       </select>
     </div>
   </div>
@@ -195,7 +186,7 @@ export function renderProviderPanel(p: Provider): string {
   <div class="fg" data-hide-ag ${p.type === 'antigravity' ? 'style="display:none"' : ''}><label>镜像备用地址</label><textarea id="mir-${escapePageHtml(p.id)}" rows="2">${(p.mirrorUrls || []).map(escapePageHtml).join('\\n')}</textarea></div>
 
   <!-- 上游 API Keys 列表(超量分页, 「查看更多」按需加载, 编辑走增量接口) -->
-  <fieldset class="form-group" data-hide-duckai ${p.type === 'duckai' ? 'style="display:none"' : ''}><legend>上游 API Keys<span style="font-weight:400;color:#888"> (共 ${(p.apiKeys || []).length} 个)</span></legend>
+  <fieldset class="form-group"><legend>上游 API Keys<span style="font-weight:400;color:#888"> (共 ${(p.apiKeys || []).length} 个)</span></legend>
     <div id="keys-${escapePageHtml(p.id)}" data-shown="${(p.apiKeys || []).length > 10 ? 10 : (p.apiKeys || []).length}">${(p.apiKeys || []).slice(0, 10).map((k, ki) => `<div class="fc mb-3 field-row" data-kidx="${ki}"><input type="text" value="${escapePageHtml(k.key)}" class="fx1" id="k-${escapePageHtml(p.id)}-${ki}"><label class="tg"><input type="checkbox" ${k.enabled ? 'checked' : ''} id="ken-${escapePageHtml(p.id)}-${ki}" onchange="keyToggle(this)"><span class="sl"></span></label><button class="icon-btn" onclick="copyRowVal(this)">${icon('copy', '', 14)}</button><button class="icon-btn" onclick="testKeyRow(this)">${icon('plug', '', 14)}</button><button class="icon-btn" onclick="rmKeyRow(this)">${icon('times', '', 14)}</button></div>`).join('')}</div>
     ${(p.apiKeys || []).length > 10 ? `<div class="fc mb-3 field-row" id="kmore-${escapePageHtml(p.id)}"><button class="btn btn-s" onclick="loadMoreKeys(this)">查看更多(已显示 10 / 共 ${(p.apiKeys || []).length})</button></div>` : ''}
     <div class="fc mt-1 field-row"><input type="text" id="nk-${escapePageHtml(p.id)}" placeholder="添加新的 API Key" class="fx1"><button class="btn btn-s" onclick="addKeyRow('${escapePageHtml(p.id)}')">${icon('plus', '', 14)}添加</button></div>
@@ -220,10 +211,8 @@ export function renderProviderPanel(p: Provider): string {
 }
 
 export async function renderAdminPage(c: Context<{ Bindings: Env }>) {
-  // 允许浏览器缓存但必须回源校验：配合下面的 ETag，内容未变时整页 304，重复访问零重传。
-  // 注意：Hono 中 c.header() 设置的头部优先级高于 handler 返回的 Response 自身头部，
-  // 因此缓存策略必须在这里设置（在 routes/pages.ts 里改 res.headers 是无效的）。
-  c.header('Cache-Control', 'private, no-cache, must-revalidate')
+  // 后台页面禁缓存: 防止浏览器/CDN 提供旧版大页面导致交互卡死
+  c.header('Cache-Control', 'no-store, no-cache, must-revalidate')
   c.header('Pragma', 'no-cache')
   const providers = await getProviders(c.env)
   const proxyKeys = await getProxyKeys(c.env)
@@ -244,8 +233,7 @@ export async function renderAdminPage(c: Context<{ Bindings: Env }>) {
     }))
   const agAccountCount = agChannels.reduce((total, ch) => total + ch.accountCount, 0)
   const storageLabel = storageTypeLabel(c.env)
-  const host = c.req.header('host') || ''
-  const apiBase = `https://${host}/v1`
+  const apiBase = `${getExternalOrigin(c)}/v1`
 
   const page = `<!DOCTYPE html><html lang="zh-CN">
 ${H('控制台')}
@@ -342,7 +330,7 @@ ${H('控制台')}
             <div class="panel-heading">
               <div>
                 <span class="panel-heading__mark">${icon('plus', '', 16)}</span>
-                <div><h3>添加新渠道</h3><p>配置基础信息、专用反代参数及可选 API Keys。</p></div>
+                <div><h3>添加新渠道</h3><p>配置基础信息、专用反代参数及 API Keys。</p></div>
               </div>
               <button class="icon-btn" type="button" onclick="hideAdd()" aria-label="关闭">${icon('times', '', 14)}</button>
             </div>
@@ -366,12 +354,12 @@ ${H('控制台')}
                 <option value="antigravity">Antigravity 反代</option>
                 <option value="claude">Claude OAuth 反代</option>
                 <option value="codex">ChatGPT (Codex) 反代</option>
+                <option value="chatgptweb">ChatGPT 网页版反代 (Free/RT)</option>
                 <option value="kimi">Kimi Coding OAuth 反代</option>
                 <option value="kimiweb">Kimi 网页版反代 (kimi.ai)</option>
                 <option value="geminiweb">Gemini 网页版反代 (Cookie)</option>
                 <option value="minimaxweb">MiniMax 网页版反代 (Token)</option>
                 <option value="lingxi">中国移动灵犀反代 (Cookie)</option>
-                <option value="duckai">Duck.ai AI Chat (免 Key)</option>
                 <option value="grok">Grok OAuth 反代</option>
                 <option value="qwen">Qwen OAuth 反代</option>
                 <option value="deepseek">DeepSeek 反代</option>
@@ -380,6 +368,7 @@ ${H('控制台')}
                 <option value="zai">Z.AI (GLM 国际)</option>
                 <option value="codebuddy">CodeBuddy (腾讯) 反代</option>
                 <option value="cline">Cline 反代</option>
+                <option value="duckai">Duck.ai 免 Key 聊天</option>
               </select>
               <span class="form-helper" id="apt-hint-new">Agnes 等聚合平台建议选 OpenAI 兼容, 视频模型自动走异步适配。</span>
             </div>
@@ -467,7 +456,7 @@ ${H('控制台')}
             </div>
 
             <!-- 上游 API Keys -->
-            <fieldset class="form-group" data-hide-duckai><legend>上游 API Keys</legend>
+            <fieldset class="form-group"><legend>上游 API Keys</legend>
               <div id="akeys">
                 <div class="fc mb-4 field-row">
                   <input type="text" placeholder="sk-xxx" class="fx1 aki">
@@ -532,8 +521,8 @@ ${H('控制台')}
                   <h3>${escapePageHtml(p.name)}</h3>
                   <div class="pu">
                     <code>${escapePageHtml(p.id)}</code>
-                    <span>${p.type === 'duckai' ? 'Duck.ai AI Chat' : p.type === 'antigravity' ? 'Antigravity' : p.type === 'claude' ? 'Claude' : p.type === 'codex' ? 'Codex' : p.type === 'kimi' ? 'Kimi' : p.type === 'grok' ? 'Grok' : p.type === 'qwen' ? 'Qwen' : p.type === 'deepseek' ? 'DeepSeek' : p.type === 'vertex' ? 'Vertex' : p.type === 'devin' ? 'Devin' : p.type === 'codebuddy' ? 'CodeBuddy' : p.type === 'cline' ? 'Cline' : p.type === 'zai' ? 'Z.AI' : (p.apiType || 'openai') === 'anthropic' ? 'Anthropic' : 'OpenAI'}</span>
-                    <span>${p.type === 'duckai' ? '免 Key' : `${p.apiKeys.length} 个 Key`}</span>
+                    <span>${p.type === 'antigravity' ? 'Antigravity' : p.type === 'claude' ? 'Claude' : p.type === 'codex' ? 'Codex' : p.type === 'chatgptweb' ? 'ChatGPT Web' : p.type === 'kimi' ? 'Kimi' : p.type === 'grok' ? 'Grok' : p.type === 'qwen' ? 'Qwen' : p.type === 'deepseek' ? 'DeepSeek' : p.type === 'vertex' ? 'Vertex' : p.type === 'devin' ? 'Devin' : p.type === 'codebuddy' ? 'CodeBuddy' : p.type === 'cline' ? 'Cline' : p.type === 'zai' ? 'Z.AI' : (p.apiType || 'openai') === 'anthropic' ? 'Anthropic' : 'OpenAI'}</span>
+                    <span>${p.apiKeys.length} 个 Key</span>
                     <span>${p.models.length} 个模型</span>
                   </div>
                 </div>
@@ -687,16 +676,8 @@ ${H('控制台')}
 <script>var AG_CHANNELS = ${JSON.stringify(agChannels).replace(/</g, '\\u003c')}
 var AZURE_VOICE_IDS = ${JSON.stringify(AZURE_TTS_VOICES.map((v) => v.id))}</script>
 <!-- 客户端脚本外链：可缓存、可压缩，不再随每次页面请求重传 -->
-<script src="${ASSET_SHARED_JS}"></script>
-<script src="${ASSET_ADMIN_JS}"></script>
+${scriptTag(ASSET_SHARED_JS, SHARED_JS)}
+${scriptTag(ASSET_ADMIN_JS, ADMIN_CLIENT_SCRIPT)}
 </body></html>`
-  const html = withIconSprite(page, CLIENT_DYNAMIC_ICONS)
-  // 整页体积大，加 ETag：内容未变时返回 304，重复访问不再重传整页
-  const etag = '"' + contentTag(html) + '"'
-  // 走 c.header()：与 Cache-Control 同理，这样才不会被 preparedHeaders 覆盖
-  c.header('ETag', etag)
-  if (c.req.header('if-none-match') === etag) {
-    return c.body(null, 304)
-  }
-  return c.html(html)
+  return c.html(withIconSprite(page, CLIENT_DYNAMIC_ICONS))
 }

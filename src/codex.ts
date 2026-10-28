@@ -35,7 +35,7 @@ const CODEX_REDIRECT_URI = 'http://localhost:1455/auth/callback'
 const CODEX_SCOPE = 'openid email profile offline_access'
 
 const CODEX_API_BASE = 'https://chatgpt.com/backend-api/codex'
-const CODEX_UA = 'codex-tui/0.154.0 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.154.0)'
+const CODEX_UA = 'codex-tui/0.156.1 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.156.1)'
 const CODEX_ORIGINATOR = 'codex-tui'
 
 const AT_PREFIX = 'codex:at:'
@@ -103,6 +103,53 @@ function parseJwtClaim(token: string, claim: string): string {
     const value = payload?.[claim]
     return typeof value === 'string' ? value : ''
   } catch { return '' }
+}
+
+function looksLikeJwt(value: string): boolean {
+  return value.split('.').length === 3 && value.startsWith('eyJ')
+}
+
+/**
+ * 从 API Key 行里提取 Codex refresh_token，兼容：
+ *  1. 纯 refresh_token（rt_xxx / rt.1.xxx）
+ *  2. 四段发货行：账号----GPT密码----邮箱密码----refreshToken
+ *  3. CPA JSON（refresh_token / tokens.refresh_token / source_line）
+ */
+export function extractCodexRefreshToken(input: string): string {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+
+  if (raw.startsWith('{') || raw.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw) as any
+      const root = Array.isArray(parsed) ? parsed[0] : parsed
+      const candidates = [
+        root?.refresh_token, root?.refreshToken, root?.rt, root?.refresh,
+        root?.tokens?.refresh_token, root?.tokens?.refreshToken,
+        root?.token?.refresh_token,
+      ]
+      for (const value of candidates) {
+        if (typeof value === 'string' && value.trim()) return value.trim()
+      }
+      if (typeof root?.source_line === 'string') return extractCodexRefreshToken(root.source_line)
+      if (root?.source_line && typeof root.source_line === 'object') {
+        return extractCodexRefreshToken(JSON.stringify(root.source_line))
+      }
+    } catch { /* 不是 JSON，继续按字符串解析 */ }
+  }
+
+  const parts = raw.split(/\s*----\s*/).map((part) => part.trim()).filter(Boolean)
+  if (parts.length > 1) {
+    const last = parts[parts.length - 1]
+    if (/^rt[._]/i.test(last) || looksLikeJwt(last)) return last
+    const rt = raw.match(/\brt[._][^\s"'，,;；]+/i)
+    if (rt) return rt[0]
+    return last
+  }
+
+  const rt = raw.match(/\brt[._][^\s"'，,;；]+/i)
+  if (rt) return rt[0]
+  return raw
 }
 
 // =====================================================================
@@ -212,7 +259,7 @@ function apiHeaders(accessToken: string, accountId: string, stream: boolean): Re
     'Accept': stream ? 'text/event-stream' : 'application/json',
     'User-Agent': CODEX_UA,
     'Originator': CODEX_ORIGINATOR,
-    'Version': '0.154.0',
+    'Version': '0.156.1',
     'Session_id': randomId(),
   }
   if (accountId) headers['Chatgpt-Account-Id'] = accountId
@@ -314,10 +361,10 @@ export function orderByCooldown<T extends { hash: string }>(accounts: T[], healt
 
 export async function handleCodexRequest(p: OAuthCallParams, subPath: string): Promise<Response> {
   const relay = await getCodexUpstreamRelay(p.env)
-  const tokens = (p.refreshTokens || []).filter((t) => t && t.trim())
+  const tokens = [...new Set((p.refreshTokens || []).map(extractCodexRefreshToken).filter(Boolean))]
   // 走中继时凭据由对端网关持有，本渠道无需配置 refresh_token
   if (tokens.length === 0 && !relay) {
-    return oauthErrorResponse('该 codex 渠道未配置凭据：请在「API Key」里每行填入一个 OpenAI OAuth refresh_token（可点「用 ChatGPT 账号授权」获取）', 400, 'configuration_error')
+    return oauthErrorResponse('该 codex 渠道未配置凭据：请在「API Key」里每行填入一个 OpenAI OAuth refresh_token、四段发货行或 CPA JSON（可点「用 ChatGPT 账号授权」获取）', 400, 'configuration_error')
   }
   const wantStream = p.body?.stream === true
 
@@ -513,8 +560,10 @@ export async function testCodex(env: Env, refreshToken: string, modelId: string,
   }
 
   if (!refreshToken) return { success: false, message: '未填写 refresh_token', statusCode: 0 }
+  const parsedRefreshToken = extractCodexRefreshToken(refreshToken)
+  if (!parsedRefreshToken) return { success: false, message: '未从输入中识别到 refresh_token', statusCode: 0 }
   try {
-    const { token, accountId } = await getAccessToken(env, refreshToken)
+    const { token, accountId } = await getAccessToken(env, parsedRefreshToken)
     const { request } = openAIToResponsesRequest({ model: modelId, messages: [{ role: 'user', content: 'hi' }], stream: true })
     request.stream = true
     let res = await fetch(`${CODEX_API_BASE}/responses`, {

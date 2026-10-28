@@ -1,10 +1,8 @@
 node_modules/
-.wrangler/
+.edgeone/
 dist/
 .DS_Store
-*.log
 .env
-.env.*
-!.env.example
-wrangler.toml
-.dev.vars
+.tef_dist/
+assets/
+src/generated-assets.ts

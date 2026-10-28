@@ -1,7 +1,11 @@
 #!/bin/bash
 # 双站模型响应速度对比测试
 # 老站: Cloudflare Pages | 新站: EdgeOne 新加坡(钉定优质IP 43.174.247.61 排除坏线路噪声)
-KEY="sk_cf_2781e99f40f74df98c51a4592ab7ad95"
+KEY="${ADMIN_PROXY_KEY:-}"
+if [ -z "$KEY" ]; then
+  echo "Set ADMIN_PROXY_KEY before running this test." >&2
+  exit 1
+fi
 OLD="https://api.seurl.eu.org"
 NEW="https://api.own.cloudns.nz"
 NEW_IP="43.174.247.61"

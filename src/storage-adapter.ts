@@ -1,9 +1,10 @@
 /**
- * 存储适配层：统一使用 Cloudflare D1。
- * 
- * 用量统计走 D1 usage_records 表 SQL 聚合。
- * KV 兼容接口由 D1 kv_store 表实现。
+ * 存储适配层：适配腾讯云 EdgeOne Makers Blob 存储
+ * 使用 @edgeone/pages-blob SDK 提供强一致性（consistency: "strong"）数据读写
  */
+
+import { getStore } from '@edgeone/pages-blob'
+import type { UsageRecord, UsageSummary } from './types'
 
 export interface KVLike {
   get(key: string): Promise<string | null>
@@ -16,136 +17,280 @@ export interface KVLike {
   }>
 }
 
-/** D1 存储实现（kv_store 表） */
-function d1KVImpl(db: D1Database): KVLike {
+let cachedBlobStore: any = null
+
+/**
+ * 获取 EdgeOne Blob Store 单例
+ * 严格遵照 IRON RULE：始终声明 consistency: "strong"
+ */
+export function getBlobStore(env?: any): any {
+  if (cachedBlobStore) return cachedBlobStore
+  try {
+    cachedBlobStore = getStore({
+      name: 'ai-gateway',
+      consistency: 'strong',
+    })
+    return cachedBlobStore
+  } catch (err: any) {
+    // 兼容本地测试或外部调用
+    const token = env?.EDGEONE_TOKEN_NEW || env?.EDGEONE_TOKEN || process.env.EDGEONE_TOKEN_NEW || process.env.EDGEONE_TOKEN
+    if (token) {
+      try {
+        cachedBlobStore = getStore({
+          name: 'ai-gateway',
+          token,
+          consistency: 'strong',
+        })
+        return cachedBlobStore
+      } catch {
+        // fallback below
+      }
+    }
+    // 内存兜底，保证极速冷启动或单测不中断
+    cachedBlobStore = createMemoryStore()
+    return cachedBlobStore
+  }
+}
+
+/** 内存兜底 Store（当不在 EdgeOne 运行环境且无凭据时使用） */
+function createMemoryStore(): any {
+  const map = new Map<string, any>()
   return {
-    async get(key) {
-      const res = await db.prepare('SELECT value, expires_at FROM kv_store WHERE key = ?').bind(key).first<{ value: string; expires_at: number | null }>()
-      if (!res) return null
-      // 检查是否过期（expires_at 为 Unix 秒，null 表示永不过期）
-      if (res.expires_at !== null && res.expires_at < Math.floor(Date.now() / 1000)) {
-        await db.prepare('DELETE FROM kv_store WHERE key = ?').bind(key).run().catch(() => {})
+    async get(key: string, _opts?: any) {
+      return map.get(key) ?? null
+    },
+    async setJSON(key: string, val: any) {
+      map.set(key, val)
+    },
+    async delete(key: string) {
+      map.delete(key)
+    },
+    async list(opts?: any) {
+      const prefix = opts?.prefix ?? ''
+      const blobs: Array<{ key: string }> = []
+      for (const k of map.keys()) {
+        if (k.startsWith(prefix)) blobs.push({ key: k })
+      }
+      return { blobs }
+    },
+  }
+}
+
+/** 基于 EdgeOne Blob 实现的 KV 兼容接口 */
+function blobKVImpl(store: any): KVLike {
+  return {
+    async get(key: string): Promise<string | null> {
+      try {
+        const blobKey = `kv/${encodeURIComponent(key)}.json`
+        const item = await store.get(blobKey, { type: 'json', consistency: 'strong' })
+        if (!item) return null
+        if (item.expiresAt && item.expiresAt < Math.floor(Date.now() / 1000)) {
+          await store.delete(blobKey).catch(() => {})
+          return null
+        }
+        return typeof item.value === 'string' ? item.value : JSON.stringify(item.value)
+      } catch (e: any) {
+        console.error(`[BlobKV] get error for ${key}:`, e?.message)
         return null
       }
-      return res.value
     },
-    async put(key, value, options) {
+    async put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void> {
+      const blobKey = `kv/${encodeURIComponent(key)}.json`
       const expiresAt = options?.expirationTtl
         ? Math.floor(Date.now() / 1000) + options.expirationTtl
         : null
-      await db.prepare(
-        'INSERT INTO kv_store (key, value, expires_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at'
-      ).bind(key, value, expiresAt).run()
+      await store.setJSON(blobKey, {
+        key,
+        value,
+        expiresAt,
+        updatedAt: Date.now(),
+      })
     },
-    async delete(key) {
-      await db.prepare('DELETE FROM kv_store WHERE key = ?').bind(key).run()
+    async delete(key: string): Promise<void> {
+      const blobKey = `kv/${encodeURIComponent(key)}.json`
+      await store.delete(blobKey).catch(() => {})
     },
-    async list(options) {
+    async list(options?: { prefix?: string; cursor?: string }): Promise<{
+      keys: Array<{ name: string }>
+      cursor?: string
+      list_complete: boolean
+    }> {
       const prefix = options?.prefix ?? ''
-      const now = Math.floor(Date.now() / 1000)
-      const limit = 1000
-
-      let query = 'SELECT key FROM kv_store WHERE key LIKE ? AND (expires_at IS NULL OR expires_at > ?)'
-      const binds: any[] = [prefix + '%', now]
-
-      if (options?.cursor) {
-        query += ' AND key > ?'
-        binds.push(options.cursor)
+      const blobPrefix = `kv/${encodeURIComponent(prefix)}`
+      const res = await store.list({
+        prefix: blobPrefix,
+        cursor: options?.cursor,
+        paginate: false,
+        consistency: 'strong',
+      })
+      const keys: Array<{ name: string }> = []
+      for (const b of res.blobs || []) {
+        if (!b.key.startsWith('kv/') || !b.key.endsWith('.json')) continue
+        const rawEncoded = b.key.slice(3, -5)
+        try {
+          const originalKey = decodeURIComponent(rawEncoded)
+          keys.push({ name: originalKey })
+        } catch {
+          keys.push({ name: rawEncoded })
+        }
       }
-      
-      query += ' ORDER BY key ASC LIMIT ?'
-      binds.push(limit)
-
-      const res = await db.prepare(query).bind(...binds).all<{ key: string }>()
-      const results = res.results || []
-
       return {
-        keys: results.map((r) => ({ name: r.key })),
-        list_complete: results.length < limit,
-        cursor: results.length === limit ? results[results.length - 1].key : undefined,
+        keys,
+        list_complete: !res.cursor,
+        cursor: res.cursor,
       }
     },
   }
 }
 
 /** 获取 KV 兼容实例 */
-export function getKV(env: any): KVLike {
-  if (!env.DB) throw new Error('Missing DB binding')
-  return d1KVImpl(env.DB)
+export function getKV(env?: any): KVLike {
+  const store = getBlobStore(env)
+  return blobKVImpl(store)
 }
 
-/**
- * 返回当前实际生效的存储类型
- */
-export function getStorageType(_env: any): 'd1' {
-  return 'd1'
+/** 返回当前实际生效的存储类型 */
+export function getStorageType(_env?: any): 'edgeone-blob' {
+  return 'edgeone-blob'
 }
 
 /** 存储类型的中文展示名 */
-export function storageTypeLabel(_env: any): string {
-  return 'D1 数据库'
+export function storageTypeLabel(_env?: any): string {
+  return 'EdgeOne Blob 数据库'
 }
 
-/** 用量记录 D1 直写（独立行，SQL 聚合） */
-export async function addUsageRecordD1(db: D1Database, record: {
-  ts: string
-  provider: string
-  model: string
-  token: string
-  ok: boolean
-  status: number
-  promptTokens: number
-  completionTokens: number
-  latencyMs: number
-}): Promise<void> {
-  await db.prepare(
-    'INSERT INTO usage_records (ts, provider, model, token, ok, status, prompt_tokens, completion_tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).bind(
-    record.ts,
-    record.provider,
-    record.model,
-    record.token,
-    record.ok ? 1 : 0,
-    record.status,
-    record.promptTokens || 0,
-    record.completionTokens || 0,
-    record.latencyMs || 0,
-  ).run().catch(() => {})
-}
+/** 写入单次用量记录并更新每日聚合 */
+export async function addUsageRecordBlob(env: any, record: UsageRecord): Promise<void> {
+  const store = getBlobStore(env)
+  const date = record.ts.slice(0, 10)
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const recordKey = `usage/records/${date}/${id}.json`
 
-let d1Initialized = false
+  // 1. 写入详情记录
+  await store.setJSON(recordKey, record).catch(() => {})
 
-/** 确保 D1 基础表结构存在（首次访问或冷启动容错） */
-export async function ensureD1Tables(db: D1Database): Promise<void> {
-  if (d1Initialized) return
+  // 2. 累加日聚合数据
+  const dailyKey = `usage/daily/${date}.json`
   try {
-    await db.batch([
-      db.prepare('CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT, expires_at INTEGER DEFAULT NULL)'),
-      db.prepare(`CREATE TABLE IF NOT EXISTS usage_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts TEXT NOT NULL,
-        provider TEXT,
-        model TEXT,
-        token TEXT,
-        ok INTEGER DEFAULT 1,
-        status INTEGER DEFAULT 200,
-        prompt_tokens INTEGER DEFAULT 0,
-        completion_tokens INTEGER DEFAULT 0,
-        latency_ms REAL DEFAULT 0
-      )`),
-      db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_records_ts ON usage_records(ts)'),
-      db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_records_model ON usage_records(model)'),
-      db.prepare('CREATE INDEX IF NOT EXISTS idx_usage_records_provider ON usage_records(provider)'),
-      db.prepare('CREATE INDEX IF NOT EXISTS idx_kv_store_expires ON kv_store(expires_at) WHERE expires_at IS NOT NULL'),
-    ])
-  } catch (e) {
-    console.error('ensureD1Tables create error:', (e as Error).message)
+    const cur = (await store.get(dailyKey, { type: 'json', consistency: 'strong' })) ?? {
+      date,
+      requests: 0,
+      successRequests: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalLatencyMs: 0,
+      byModel: {},
+      byProvider: {},
+    }
+    cur.requests += 1
+    if (record.ok) cur.successRequests += 1
+    cur.promptTokens += record.promptTokens || 0
+    cur.completionTokens += record.completionTokens || 0
+    cur.totalLatencyMs += record.latencyMs || 0
+
+    const displayModel = (record.model || '').replace(/[:\/\-]free$/i, '') || record.model || 'unknown'
+    cur.byModel[displayModel] = cur.byModel[displayModel] || { requests: 0, promptTokens: 0, completionTokens: 0 }
+    cur.byModel[displayModel].requests += 1
+    cur.byModel[displayModel].promptTokens += record.promptTokens || 0
+    cur.byModel[displayModel].completionTokens += record.completionTokens || 0
+
+    const provider = record.provider || 'unknown'
+    cur.byProvider[provider] = cur.byProvider[provider] || { requests: 0, promptTokens: 0, completionTokens: 0 }
+    cur.byProvider[provider].requests += 1
+    cur.byProvider[provider].promptTokens += record.promptTokens || 0
+    cur.byProvider[provider].completionTokens += record.completionTokens || 0
+
+    await store.setJSON(dailyKey, cur)
+  } catch (err: any) {
+    console.warn('[Usage] Daily aggregation update failed:', err?.message)
+  }
+}
+
+/** 聚合指定天数的用量统计 */
+export async function getUsageSummaryBlob(env: any, days: number): Promise<UsageSummary> {
+  const store = getBlobStore(env)
+  const dates: string[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000)
+    dates.push(d.toISOString().slice(0, 10))
   }
 
-  try {
-    // 独立执行 ALTER，避免其静默报错导致整个 batch 事务回滚
-    await db.prepare('ALTER TABLE kv_store ADD COLUMN expires_at INTEGER DEFAULT NULL').run()
-  } catch (e) { /* ignore expected duplicate column error */ }
+  // 并行获取每天的聚合数据
+  const dailyResults = await Promise.all(
+    dates.map(async (date) => {
+      const dailyKey = `usage/daily/${date}.json`
+      const data = await store.get(dailyKey, { type: 'json', consistency: 'strong' }).catch(() => null)
+      return { date, data }
+    })
+  )
 
-  d1Initialized = true
+  let totalRequests = 0
+  let successRequests = 0
+  let totalPromptTokens = 0
+  let totalCompletionTokens = 0
+  let totalLatencyMs = 0
+
+  const byModelMap = new Map<string, { requests: number; promptTokens: number; completionTokens: number }>()
+  const byProviderMap = new Map<string, { requests: number; promptTokens: number; completionTokens: number }>()
+  const dailyArr: Array<{ date: string; requests: number; promptTokens: number; completionTokens: number }> = []
+
+  for (const { date, data } of dailyResults) {
+    if (!data) {
+      dailyArr.push({ date, requests: 0, promptTokens: 0, completionTokens: 0 })
+      continue
+    }
+
+    totalRequests += data.requests || 0
+    successRequests += data.successRequests || 0
+    totalPromptTokens += data.promptTokens || 0
+    totalCompletionTokens += data.completionTokens || 0
+    totalLatencyMs += data.totalLatencyMs || 0
+
+    dailyArr.push({
+      date,
+      requests: data.requests || 0,
+      promptTokens: data.promptTokens || 0,
+      completionTokens: data.completionTokens || 0,
+    })
+
+    for (const [model, stats] of Object.entries<any>(data.byModel || {})) {
+      const prev = byModelMap.get(model) || { requests: 0, promptTokens: 0, completionTokens: 0 }
+      byModelMap.set(model, {
+        requests: prev.requests + stats.requests,
+        promptTokens: prev.promptTokens + stats.promptTokens,
+        completionTokens: prev.completionTokens + stats.completionTokens,
+      })
+    }
+
+    for (const [prov, stats] of Object.entries<any>(data.byProvider || {})) {
+      const prev = byProviderMap.get(prov) || { requests: 0, promptTokens: 0, completionTokens: 0 }
+      byProviderMap.set(prov, {
+        requests: prev.requests + stats.requests,
+        promptTokens: prev.promptTokens + stats.promptTokens,
+        completionTokens: prev.completionTokens + stats.completionTokens,
+      })
+    }
+  }
+
+  const byModel = Array.from(byModelMap.entries())
+    .map(([model, s]) => ({ model, ...s }))
+    .sort((a, b) => b.requests - a.requests)
+
+  const byProvider = Array.from(byProviderMap.entries())
+    .map(([provider, s]) => ({ provider, ...s }))
+    .sort((a, b) => b.requests - a.requests)
+
+  const avgLatencyMs = totalRequests > 0 ? Math.round(totalLatencyMs / totalRequests) : 0
+
+  return {
+    days,
+    totalRequests,
+    successRequests,
+    totalPromptTokens,
+    totalCompletionTokens,
+    avgLatencyMs,
+    byModel,
+    byProvider,
+    daily: dailyArr,
+  }
 }

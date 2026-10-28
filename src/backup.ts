@@ -1,22 +1,24 @@
 import { Context } from 'hono'
 import type { Env, BackupData, ApiResponse } from './types'
 import { deleteAllSessions, getAdminCredentials } from './storage'
+import { getKV, getBlobStore } from './storage-adapter'
 
 const BACKUP_PREFIX = 'backup/'
 
 /** 全量导出: kv_store 配置 + usage_records 用量 (排除会话、管理员凭据、Telegram 配置) */
 async function exportBackupData(env: Env): Promise<BackupData> {
   const kv: Array<{ key: string; value: string }> = []
-  let usage: any[] = []
+  const usage: any[] = []
 
-  if (!env.DB) throw new Error('Missing DB binding')
-
-  const kvRows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key NOT LIKE 'admin:session:%' AND key != 'admin:credentials' AND key != 'telegram:backup'").all<{ key: string; value: string }>()
-  for (const r of kvRows.results || []) kv.push(r)
-  const usageRows = await env.DB.prepare(
-    'SELECT ts, provider, model, token, ok, status, prompt_tokens, completion_tokens, latency_ms FROM usage_records ORDER BY id ASC'
-  ).all<any>()
-  usage = usageRows.results || []
+  const kvStore = getKV(env)
+  const listRes = await kvStore.list()
+  for (const k of listRes.keys) {
+    if (k.name.startsWith('admin:session:') || k.name === 'admin:credentials' || k.name === 'telegram:backup') continue
+    const val = await kvStore.get(k.name)
+    if (val !== null) {
+      kv.push({ key: k.name, value: val })
+    }
+  }
 
   return { version: 1, exportedAt: new Date().toISOString(), kv, usage }
 }
@@ -27,25 +29,18 @@ async function importBackupData(env: Env, data: BackupData): Promise<{ kv: numbe
   const kv = Array.isArray(data.kv) ? data.kv : []
   const usage = Array.isArray(data.usage) ? data.usage : []
 
-  if (!env.DB) throw new Error('Missing DB binding')
+  const kvStore = getKV(env)
+  // 清理非排除项
+  const existing = await kvStore.list()
+  for (const k of existing.keys) {
+    if (k.name.startsWith('admin:session:') || k.name === 'admin:credentials' || k.name === 'telegram:backup') continue
+    await kvStore.delete(k.name)
+  }
 
-  // 清空现有数据 (保留会话 key、管理员凭据与 Telegram 配置)
-  await env.DB.prepare("DELETE FROM kv_store WHERE key NOT LIKE 'admin:session:%' AND key != 'admin:credentials' AND key != 'telegram:backup'").run()
-  await env.DB.prepare('DELETE FROM usage_records').run()
-  
-  // 批量写入 kv
-  const kvStmt = env.DB.prepare('INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)')
-  const kvBatch = kv.map((r) => kvStmt.bind(r.key, r.value))
-  if (kvBatch.length > 0) await env.DB.batch(kvBatch)
-  
-  // 批量写入 usage
-  const uStmt = env.DB.prepare(
-    'INSERT OR REPLACE INTO usage_records (ts, provider, model, token, ok, status, prompt_tokens, completion_tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  )
-  const uBatch = usage.map((r) =>
-    uStmt.bind(r.ts, r.provider, r.model, r.token || '', Number(r.ok) || 0, Number(r.status) || 0, Number(r.prompt_tokens) || 0, Number(r.completion_tokens) || 0, Number(r.latency_ms) || 0)
-  )
-  if (uBatch.length > 0) await env.DB.batch(uBatch)
+  // 恢复写入 kv
+  for (const item of kv) {
+    await kvStore.put(item.key, item.value)
+  }
 
   // 强制登出所有会话: 导入/恢复可能改变数据, 要求重新登录
   await deleteAllSessions(env)
@@ -175,17 +170,13 @@ export interface TelegramConfig {
 }
 
 export async function getTgConfig(env: Env): Promise<TelegramConfig | null> {
-  if (!env.DB) return null
-  const res = await env.DB.prepare("SELECT value FROM kv_store WHERE key = 'telegram:backup'").first<{ value: string }>()
-  if (!res || !res.value) return null
-  try { return JSON.parse(res.value) as TelegramConfig } catch { return null }
+  const val = await getKV(env).get('telegram:backup')
+  if (!val) return null
+  try { return JSON.parse(val) as TelegramConfig } catch { return null }
 }
 
 export async function saveTgConfig(env: Env, botToken: string, chatId: string): Promise<void> {
-  if (!env.DB) return
-  await env.DB.prepare(
-    "INSERT INTO kv_store (key, value) VALUES ('telegram:backup', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  ).bind(JSON.stringify({ botToken, chatId })).run()
+  await getKV(env).put('telegram:backup', JSON.stringify({ botToken, chatId }))
 }
 
 export async function handleTelegramSave(c: Context<{ Bindings: Env }>) {

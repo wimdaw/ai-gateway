@@ -1,22 +1,26 @@
 {
-  "name": "ai-gateway",
+  "name": "ai-gateway-edgeone",
   "version": "1.0.0",
   "type": "module",
-  "dependencies": {
-    "hono": "^4.12.27"
-  },
+  "main": "cloud-functions/[[default]].js",
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "dev": "node scripts/build.mjs && wrangler pages dev dist",
-    "preview": "node scripts/build.mjs && wrangler pages dev dist",
-    "typecheck": "tsc --noEmit",
-    "build:pages": "node scripts/build.mjs",
-    "deploy:pages": "node scripts/build.mjs && wrangler pages deploy dist --project-name ai-gateway"
+    "build": "npm run build:bundle",
+    "build:bundle": "node scripts/prebuild.mjs && node scripts/build-bundle.mjs",
+    "dev": "PAGES_SOURCE=skills npx edgeone makers dev",
+    "deploy": "npm run build && PAGES_SOURCE=skills npx edgeone makers deploy --json",
+    "verify": "node scripts/verify-deploy.mjs",
+    "deploy:verify": "npm run deploy && npm run verify"
+  },
+  "dependencies": {
+    "@edgeone/pages-blob": "^0.0.17",
+    "hono": "^4.12.27",
+    "wreq-js": "^3.2.0",
+    "@wreq-js/binding-linux-x64-gnu": "^3.2.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260702.1",
+    "@types/node": "^20.17.0",
+    "edgeone": "^1.6.41",
     "esbuild": "^0.28.2",
-    "typescript": "^5.9.2",
-    "wrangler": "^4.107.0"
+    "typescript": "^5.9.2"
   }
 }

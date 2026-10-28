@@ -1,0 +1,4 @@
+# 占位文件：EdgeOne Makers 构建需要输出目录存在。
+# 本项目的首页/后台都由 cloud-functions 里的函数动态渲染，不使用静态快照页，
+# 所以这里刻意不放假页面（根路径由 .edgeone/routes.json 的 / -> /home 重写交给函数）。
+# 保留该目录可避免把仓库根当成静态产物目录，从而不对外暴露 src/、package.json 等源码。

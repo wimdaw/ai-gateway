@@ -2,14 +2,13 @@ import { Context } from 'hono'
 import { getProviders } from './storage'
 import { SITE_CONFIG } from './config'
 import type { Env } from './types'
-import { ASSET_CSS } from './assets'
+import { CSS_CONTENT } from './pages.css'
+import { cssTag } from './assets'
+import { getExternalOrigin } from './request-utils'
 import { icon, renderSiteFooter, withIconSprite } from './shared.js'
 
-function getPlatformLabel(env: any, host?: string): string {
-  const isWorker = typeof host === 'string' && host.includes('workers.dev')
-  const platform = isWorker ? 'Workers' : 'Pages'
-  const storage = env?.DB ? 'D1' : env?.KV ? 'KV' : 'Memory'
-  return `${platform} · ${storage}`
+function getPlatformLabel(_env: any, _host?: string): string {
+  return 'EdgeOne · Blob'
 }
 
 const escapePageHtml = (value: unknown) => String(value ?? '')
@@ -26,13 +25,12 @@ const H = (title: string) => `
   <meta name="theme-color" content="#f8fafc">
   <title>${title} — ${SITE_CONFIG.title}</title>
   <link rel="icon" href="${SITE_CONFIG.favicon}">
-  <link rel="stylesheet" href="${ASSET_CSS}">
+  ${cssTag(CSS_CONTENT)}
 </head>`
 
 export async function renderHomePage(c: Context<{ Bindings: Env }>, isLoggedIn: boolean) {
   const providers = await getProviders(c.env)
-  const host = c.req.header('host') || 'localhost:8787'
-  const apiBase = `https://${host}/v1`
+  const apiBase = `${getExternalOrigin(c)}/v1`
   const enabledProviders = providers.filter((p) => p.enabled)
   const allModelsCount = providers.reduce((total, p) => total + p.models.length, 0)
   const enabledModelsCount = enabledProviders.reduce((total, p) => total + p.models.filter((m) => m.enabled).length, 0)

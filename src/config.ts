@@ -8,6 +8,7 @@ export const SITE_CONFIG = {
   blogUrl: 'https://blog.notett.com',
   description: 'AI 渠道 API 代理网关 — 统一 /v1 接口转发',
   favicon: 'https://pan.811520.xyz/icon/ai.webp',
+  faCdn: 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css',
 }
 
 export const SESSION_TTL = 7 * 24 * 60 * 60
@@ -29,6 +30,7 @@ export const KV_KEYS = {
   KEY_HEALTH_PREFIX: 'key:health:',
   AG_HEALTH_PREFIX: 'ag:health:',
   OPENCODE_MIGRATION: 'migration:opencode-default:v1',
+  OPENCODE_MODELS_MIGRATION: 'migration:opencode-model-catalog:v2',
   USAGE_PREFIX: 'usage:req:',
 } as const
 

@@ -70,7 +70,7 @@ function toast(msg, t) {
 }
 
 // ── 统一 API 调用 ──
-// 把「网络异常 / 非 JSON 响应 / 会话失效」三种失败收敛为 { success:false, message, status }，
+// 把「网络异常 / 非 JSON 响应 / 会话失效」收敛为 { success:false, message, status }，
 // 调用方只判断 d.success，不再出现未捕获的 Promise 异常导致界面静默无反应。
 async function apiCall(url, options) {
   var res
@@ -107,8 +107,7 @@ function tog(id) {
   var opening = !d.classList.contains('open')
   d.classList.toggle('open')
   if (c) c.style.transform = opening ? 'rotate(90deg)' : ''
-  // ── 面板懒加载 ──
-  // 列表页只渲染摘要，编辑面板在首次展开时才取。取回前显示占位，失败可重试。
+  // ── 面板懒加载：列表页只渲染摘要，编辑面板首次展开时才取 ──
   if (opening && d.getAttribute('data-lazy') === '1') {
     d.removeAttribute('data-lazy')
     d.innerHTML = '<div class="form-helper" style="padding:16px 0">' + svgIcon('spinner', 'spin', 14) + ' 正在加载编辑面板…</div>'
@@ -141,11 +140,11 @@ const OAUTH_DEFAULT_URLS = {
   zai: 'https://api.z.ai/api/coding/paas/v4', 
   codebuddy: 'https://copilot.tencent.com', 
   cline: 'https://api.cline.bot',
+  chatgptweb: 'https://chatgpt.com',
   kimiweb: 'https://www.kimi.ai',
   geminiweb: 'https://gemini.google.com',
   minimaxweb: 'https://agent.minimaxi.com',
-  lingxi: 'https://ai.yun.139.com',
-  duckai: 'https://duck.ai'
+  lingxi: 'https://ai.yun.139.com' 
 }
 function isOauthType(t) { return ['claude', 'codex', 'kimi', 'grok', 'qwen', 'codebuddy', 'cline'].indexOf(t) !== -1 }
 function isDeepseekType(t) { return t === 'deepseek' }
@@ -153,7 +152,7 @@ function isKimiWebType(t) { return t === 'kimiweb' }
 function isGeminiWebType(t) { return t === 'geminiweb' }
 function isMiniMaxWebType(t) { return t === 'minimaxweb' }
 function isLingxiType(t) { return t === 'lingxi' }
-function isDuckAiType(t) { return t === 'duckai' }
+function isChatgptWebType(t) { return t === 'chatgptweb' }
 function isZaiType(t) { return t === 'zai' }
 function isCodebuddyType(t) { return t === 'codebuddy' }
 
@@ -174,7 +173,6 @@ function onTypeChange(sel, id) {
   const isTts = sel.value === 'azure-tts'
   const isAg = sel.value === 'antigravity'
   const isOa = isOauthType(sel.value)
-  const isDuckAi = isDuckAiType(sel.value)
   const ttsBox = document.getElementById('tts-' + id)
   if (ttsBox) ttsBox.style.display = isTts ? '' : 'none'
   const agBox = document.getElementById('ag-' + id)
@@ -200,43 +198,40 @@ function onTypeChange(sel, id) {
       : sel.value === 'azure-tts' ? '内置免费语音合成, 无需 API Key。'
       : sel.value === 'antigravity' ? 'Antigravity 反代: 点「用 Google 账号授权」获取 refresh_token, 请求自动翻译成 Gemini 协议。支持多账号(一行一个)。'
       : sel.value === 'claude' ? 'Claude OAuth 反代: 授权登录获取 refresh_token, 请求自动翻译成 Anthropic Messages 协议。'
-      : sel.value === 'codex' ? 'ChatGPT (Codex) 反代: 授权登录获取 refresh_token, 请求自动翻译成 Responses 协议。'
+      : sel.value === 'codex' ? 'ChatGPT (Codex) 反代: 授权登录获取 refresh_token；API Keys 也支持直接粘贴 CPA JSON（单行）或「账号----GPT密码----邮箱密码----rt」发货行，网关自动提取 refresh_token。'
+      : sel.value === 'chatgptweb' ? 'ChatGPT 网页版反代: API Keys 一行一个账号，可直接粘贴发货整行「账号----GPT密码----邮箱密码----rt.1.xxx」（自动取最后一段），也可只填 rt.1.xxx / rt_xxx；走网页 conversation，不能用于 Codex。'
       : sel.value === 'kimi' ? 'Kimi 反代: 设备码授权获取 refresh_token, OpenAI 兼容直通。'
       : sel.value === 'grok' ? 'Grok (xAI) 反代: 设备码授权获取 refresh_token, 请求自动翻译成 Responses 协议。'
       : sel.value === 'qwen' ? 'Qwen 反代: 设备码授权获取 refresh_token, OpenAI 兼容直通。'
       : sel.value === 'deepseek' ? 'DeepSeek 反代: 填官方 API Key(sk-, 直连 api.deepseek.com) 或网页 userToken(PoW)。'
       : sel.value === 'codebuddy' ? 'CodeBuddy(腾讯) 反代: 先在下方选国内版或国际版, 再点「授权登录」获取 refresh_token。'
       : sel.value === 'cline' ? 'Cline 反代: 点「授权登录」走设备码流程获取 refreshToken, 多账号一行一个轮换。'
-      : sel.value === 'duckai' ? 'Duck.ai AI Chat 免上游 Key；后台可读取当前免费模型，聊天前由 Worker 沙箱处理动态挑战。'
       : sel.value === 'zai' ? 'Z.AI 预设: 填 z.ai 的 API Key(编码套餐)。/v1/messages 自动走 Anthropic 端点, 其余走 OpenAI 端点。'
       : 'Agnes 等聚合平台建议选 OpenAI 兼容, 视频模型自动走异步适配。'
   }
-  const hideForOAuth = isAg || isOa || isDs || isDuckAi
+  const hideForOAuth = isAg || isOa || isDs
   const scope = id === 'new' ? document.getElementById('af') : document.getElementById('dt-' + id)
   if (scope) {
     scope.querySelectorAll('[data-hide-ag]').forEach(function (el) { el.style.display = hideForOAuth ? 'none' : '' })
-    scope.querySelectorAll('[data-hide-duckai]').forEach(function (el) { el.style.display = isDuckAi ? 'none' : '' })
   }
   if (id === 'new') {
     const url = document.getElementById('aurl')
     if (url) {
-      url.disabled = isTts || isAg || (isOa && !isCb) || isDs || isDuckAi
+      url.disabled = isTts || isAg || (isOa && !isCb) || isDs || isChatgptWebType(sel.value)
       if (isTts) url.value = ''
       else if (isAg) url.value = 'https://daily-cloudcode-pa.googleapis.com'
       else if (isCb) url.value = cbRegionUrl('new')
-      else if (isDuckAi) url.value = OAUTH_DEFAULT_URLS.duckai
-      else if (isOa || isDs) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
+      else if (isOa || isDs || isChatgptWebType(sel.value)) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
       else if (isZai) url.value = OAUTH_DEFAULT_URLS.zai
       else if (!url.value) url.value = 'https://'
     }
   } else {
     const url = document.getElementById('url-' + id)
     if (url) {
-      url.disabled = isTts || isAg || (isOa && !isCb) || isDs || isDuckAi
-      if (isDuckAi) url.value = OAUTH_DEFAULT_URLS.duckai
+      url.disabled = isTts || isAg || (isOa && !isCb) || isDs || isChatgptWebType(sel.value)
       if (isAg && !url.value) url.value = 'https://daily-cloudcode-pa.googleapis.com'
       if (isCb && !url.value) url.value = cbRegionUrl(id)
-      if ((isOa && !isCb || isDs) && !url.value) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
+      if ((isOa && !isCb || isDs || isChatgptWebType(sel.value)) && !url.value) url.value = OAUTH_DEFAULT_URLS[sel.value] || 'https://'
       if (isZai && !url.value) url.value = OAUTH_DEFAULT_URLS.zai
       if (isTts && !url.dataset.orig) url.dataset.orig = url.value
     }
@@ -413,7 +408,12 @@ async function oauthChannel(id) {
           if (dd.success && dd.data && dd.data.refresh_token) {
             closeM()
             addKeyValue(id, dd.data.refresh_token)
-            toast('授权成功，refresh_token 已填入 API Keys，保存渠道后生效', 'success')
+            var acctEmail = dd.data.email || ''
+            if (provType(id) === 'cline' && acctEmail) {
+              toast('已获取账号 ' + acctEmail + ' 的 refreshToken。若这是旧账号而非要新增的账号：复制完整授权链接到无痕窗口重新授权（授权页会复用浏览器已登录的会话，无法从链接强制切换）', 'success')
+            } else {
+              toast('授权成功，refresh_token 已填入 API Keys，保存渠道后生效', 'success')
+            }
             if (tr) showResult(tr, true, '')
           } else {
             toast(dd.message || '换取 token 失败', 'error')
@@ -676,24 +676,17 @@ async function fetchOAuthModels(id) {
     const keys = getKeys(id)
     key = keys.length > 0 ? keys[0].key : ''
   }
-  if (id === 'new' && !key && provider !== 'duckai') { toast('请先填写或授权获取 refresh_token', 'error'); return }
+  if (id === 'new' && !key) { toast('请先填写或授权获取 refresh_token', 'error'); return }
   if (tr) showSpinner(tr)
   try {
     const baseEl = document.getElementById(id === 'new' ? 'aurl' : 'url-' + id)
     const baseUrl = baseEl ? baseEl.value.trim() : ''
-    let models = []
-    if (provider === 'duckai') {
-      const result = await testKeyConnection(baseUrl, 'openai', '', id === 'new' ? document.getElementById('aid').value.trim() : id, undefined, false, 'duckai')
-      if (!result.success) { if (tr) showResult(tr, false, result.message || '获取失败'); return }
-      models = ((result.data && result.data.data) || []).map(function (m) { return typeof m === 'string' ? m : m.id }).filter(Boolean)
-    } else {
-      const d = await apiCall('/admin/api/oauth/' + provider + '/models', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: key, apiKey: key, providerId: id !== 'new' ? id : undefined, baseUrl: baseUrl, region: cbRegionValue(id) })
-      })
-      if (!d.success) { if (tr) showResult(tr, false, d.message || '获取失败'); return }
-      models = (d.data && d.data.models) || []
-    }
+    const d = await apiCall('/admin/api/oauth/' + provider + '/models', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: key, apiKey: key, providerId: id !== 'new' ? id : undefined, baseUrl: baseUrl, region: cbRegionValue(id) })
+    })
+    if (!d.success) { if (tr) showResult(tr, false, d.message || '获取失败'); return }
+    const models = (d.data && d.data.models) || []
     if (!models.length) { if (tr) showResult(tr, false, '未解析到模型'); return }
     const existing = {}
     const sel = id === 'new' ? '#amodels .ami' : '#ml-' + id + ' [data-idx] input'
@@ -1129,14 +1122,13 @@ async function createProv() {
   if (!url && type === 'antigravity') url = 'https://daily-cloudcode-pa.googleapis.com'
   if (!url && type === 'vertex') url = 'https://aiplatform.googleapis.com'
   if (!url && type === 'devin') url = 'https://server.codeium.com'
-  if (!url && (isOauthType(type) || isDeepseekType(type) || isZaiType(type) || isKimiWebType(type) || isGeminiWebType(type) || isMiniMaxWebType(type) || isLingxiType(type) || isDuckAiType(type))) url = OAUTH_DEFAULT_URLS[type] || ''
+  if (!url && (isOauthType(type) || isDeepseekType(type) || isZaiType(type) || isKimiWebType(type) || isGeminiWebType(type) || isMiniMaxWebType(type) || isLingxiType(type) || isChatgptWebType(type))) url = OAUTH_DEFAULT_URLS[type] || ''
   if (!url && !isTts) { toast('请填写 API 地址', 'error'); return }
 
   let keys = Array.from(document.querySelectorAll('#akeys .field-row')).map(r => {
     const k = r.querySelector('.aki').value.trim(), en = r.querySelector('.ake').checked
     return k ? { key: k, enabled: en } : null
   }).filter(Boolean)
-  if (isDuckAiType(type)) keys = []
 
   const vxKeys = type === 'vertex' ? provVertexKeys('new') : null
   if (vxKeys && vxKeys.length) keys = vxKeys.map(k => ({ key: k, enabled: true }))
@@ -1149,7 +1141,6 @@ async function createProv() {
     if (!mid) return null
     return alias ? { id: mid, enabled: en, alias: alias } : { id: mid, enabled: en }
   }).filter(Boolean)
-  if (isDuckAiType(type) && models.length === 0) models.push({ id: 'gpt-5.4-mini', enabled: true })
 
   const enabled = document.getElementById('aen').checked
   const mirrorUrls = document.getElementById('amirror').value
@@ -1343,9 +1334,8 @@ async function save(id) {
   if (!url && type === 'antigravity') url = 'https://daily-cloudcode-pa.googleapis.com'
   if (!url && type === 'vertex') url = 'https://aiplatform.googleapis.com'
   if (!url && type === 'devin') url = 'https://server.codeium.com'
-  if (!url && (isOauthType(type) || isDeepseekType(type) || isZaiType(type) || isKimiWebType(type) || isGeminiWebType(type) || isMiniMaxWebType(type) || isLingxiType(type) || isDuckAiType(type))) url = OAUTH_DEFAULT_URLS[type] || ''
+  if (!url && (isOauthType(type) || isDeepseekType(type) || isZaiType(type) || isKimiWebType(type) || isGeminiWebType(type) || isMiniMaxWebType(type) || isLingxiType(type) || isChatgptWebType(type))) url = OAUTH_DEFAULT_URLS[type] || ''
   let keys = getKeys(id)
-  if (isDuckAiType(type)) keys = []
   const vxKeys = type === 'vertex' ? provVertexKeys(id) : null
   if (vxKeys && vxKeys.length) keys = vxKeys.map(k => ({ key: k, enabled: true }))
   const dvKeys = type === 'devin' ? provDevinKeys(id) : null
@@ -1363,7 +1353,7 @@ async function save(id) {
   const d = await apiCall('/admin/api/providers/' + encodeURIComponent(id), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: nm, baseUrl: url, apiType, type, region: isCodebuddyType(type) ? cbRegionValue(id) : undefined, apiKeys: type === 'duckai' ? [] : (type !== 'vertex' && type !== 'devin') ? undefined : keys, models, mirrorUrls, enabled, newId, project: provProject(id) || undefined, location: provVertexLocation(id) || undefined, ...ttsConf })
+    body: JSON.stringify({ name: nm, baseUrl: url, apiType, type, region: isCodebuddyType(type) ? cbRegionValue(id) : undefined, apiKeys: (type !== 'vertex' && type !== 'devin') ? undefined : keys, models, mirrorUrls, enabled, newId, project: provProject(id) || undefined, location: provVertexLocation(id) || undefined, ...ttsConf })
   })
   if (d.success) { toast('已保存', 'success'); location.reload() }
   else toast(d.message || '保存失败', 'error')
@@ -1608,11 +1598,10 @@ async function backupExport() {
   const hash = await adminAuthHash()
   if (!hash) { tr.innerHTML = ''; return }
   try {
-    // 导出是二进制下载：必须拿原始 Response，不能走 apiCall（apiCall 会读掉 body）
-    const res = await fetch('/admin/api/backup/export', { headers: { 'X-Admin-Auth': hash } })
-    if (!res.ok) { bkResult('bk-io-result', false, '导出失败: ' + (res.status === 401 ? '密码验证失败' : 'HTTP ' + res.status)); return }
-    const blob = await res.blob()
-    const cd = res.headers.get('Content-Disposition') || ''
+    const d = await apiCall('/admin/api/backup/export', { headers: { 'X-Admin-Auth': hash } })
+    if (!r.ok) { bkResult('bk-io-result', false, '导出失败: ' + (r.status === 401 ? '密码验证失败' : 'HTTP ' + r.status)); return }
+    const blob = await r.blob()
+    const cd = r.headers.get('Content-Disposition') || ''
     const name = (cd.match(/filename="?([^";]+)/) || [])[1] || 'ai-gateway-backup.json'
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -1642,7 +1631,6 @@ function backupImport(file) {
   const reader = new FileReader()
   reader.onload = async function () {
     try {
-      // 修复：原代码用了未声明的 d，导致文件导入始终抛 ReferenceError 并显示“导入失败”
       const d = await apiCall('/admin/api/backup/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Admin-Auth': bkImportHash },
