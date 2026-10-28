@@ -1,6 +1,7 @@
 import { Context } from 'hono'
 import type { Env, BackupData, ApiResponse } from './types'
 import { deleteAllSessions, getAdminCredentials } from './storage'
+import { getKV } from './storage-adapter'
 
 const BACKUP_PREFIX = 'backup/'
 
@@ -9,14 +10,21 @@ async function exportBackupData(env: Env): Promise<BackupData> {
   const kv: Array<{ key: string; value: string }> = []
   let usage: any[] = []
 
-  if (!env.DB) throw new Error('Missing DB binding')
-
-  const kvRows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key NOT LIKE 'admin:session:%' AND key != 'admin:credentials' AND key != 'telegram:backup'").all<{ key: string; value: string }>()
-  for (const r of kvRows.results || []) kv.push(r)
-  const usageRows = await env.DB.prepare(
-    'SELECT ts, provider, model, token, ok, status, prompt_tokens, completion_tokens, latency_ms FROM usage_records ORDER BY id ASC'
-  ).all<any>()
-  usage = usageRows.results || []
+  if (env.PG) {
+    const kvRows = await env.PG`SELECT key, value FROM kv_store WHERE key NOT LIKE 'admin:session:%' AND key != 'admin:credentials' AND key != 'telegram:backup'`
+    for (const r of kvRows || []) kv.push({ key: r.key, value: r.value })
+    const usageRows = await env.PG`SELECT ts, provider, model, token, ok, status, prompt_tokens, completion_tokens, latency_ms FROM usage_records ORDER BY id ASC`
+    usage = usageRows || []
+  } else if (env.DB) {
+    const kvRows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key NOT LIKE 'admin:session:%' AND key != 'admin:credentials' AND key != 'telegram:backup'").all<{ key: string; value: string }>()
+    for (const r of kvRows.results || []) kv.push(r)
+    const usageRows = await env.DB.prepare(
+      'SELECT ts, provider, model, token, ok, status, prompt_tokens, completion_tokens, latency_ms FROM usage_records ORDER BY id ASC'
+    ).all<any>()
+    usage = usageRows.results || []
+  } else {
+    throw new Error('Missing DB / PG binding')
+  }
 
   return { version: 1, exportedAt: new Date().toISOString(), kv, usage }
 }
@@ -27,25 +35,45 @@ async function importBackupData(env: Env, data: BackupData): Promise<{ kv: numbe
   const kv = Array.isArray(data.kv) ? data.kv : []
   const usage = Array.isArray(data.usage) ? data.usage : []
 
-  if (!env.DB) throw new Error('Missing DB binding')
-
-  // 清空现有数据 (保留会话 key、管理员凭据与 Telegram 配置)
-  await env.DB.prepare("DELETE FROM kv_store WHERE key NOT LIKE 'admin:session:%' AND key != 'admin:credentials' AND key != 'telegram:backup'").run()
-  await env.DB.prepare('DELETE FROM usage_records').run()
-  
-  // 批量写入 kv
-  const kvStmt = env.DB.prepare('INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)')
-  const kvBatch = kv.map((r) => kvStmt.bind(r.key, r.value))
-  if (kvBatch.length > 0) await env.DB.batch(kvBatch)
-  
-  // 批量写入 usage
-  const uStmt = env.DB.prepare(
-    'INSERT OR REPLACE INTO usage_records (ts, provider, model, token, ok, status, prompt_tokens, completion_tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  )
-  const uBatch = usage.map((r) =>
-    uStmt.bind(r.ts, r.provider, r.model, r.token || '', Number(r.ok) || 0, Number(r.status) || 0, Number(r.prompt_tokens) || 0, Number(r.completion_tokens) || 0, Number(r.latency_ms) || 0)
-  )
-  if (uBatch.length > 0) await env.DB.batch(uBatch)
+  if (env.PG) {
+    await env.PG`DELETE FROM kv_store WHERE key NOT LIKE 'admin:session:%' AND key != 'admin:credentials' AND key != 'telegram:backup'`
+    await env.PG`DELETE FROM usage_records`
+    for (const r of kv) {
+      await env.PG`INSERT INTO kv_store (key, value) VALUES (${r.key}, ${r.value}) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value`
+    }
+    const chunkSize = 500
+    for (let i = 0; i < usage.length; i += chunkSize) {
+      const chunk = usage.slice(i, i + chunkSize).map((r) => ({
+        ts: r.ts,
+        provider: r.provider,
+        model: r.model,
+        token: r.token || '',
+        ok: Number(r.ok) || 0,
+        status: Number(r.status) || 0,
+        prompt_tokens: Number(r.prompt_tokens) || 0,
+        completion_tokens: Number(r.completion_tokens) || 0,
+        latency_ms: Number(r.latency_ms) || 0,
+      }))
+      if (chunk.length > 0) {
+        await env.PG`INSERT INTO usage_records ${env.PG(chunk, 'ts', 'provider', 'model', 'token', 'ok', 'status', 'prompt_tokens', 'completion_tokens', 'latency_ms')}`
+      }
+    }
+  } else if (env.DB) {
+    await env.DB.prepare("DELETE FROM kv_store WHERE key NOT LIKE 'admin:session:%' AND key != 'admin:credentials' AND key != 'telegram:backup'").run()
+    await env.DB.prepare('DELETE FROM usage_records').run()
+    const kvStmt = env.DB.prepare('INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)')
+    const kvBatch = kv.map((r) => kvStmt.bind(r.key, r.value))
+    if (kvBatch.length > 0) await env.DB.batch(kvBatch)
+    const uStmt = env.DB.prepare(
+      'INSERT OR REPLACE INTO usage_records (ts, provider, model, token, ok, status, prompt_tokens, completion_tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    )
+    const uBatch = usage.map((r) =>
+      uStmt.bind(r.ts, r.provider, r.model, r.token || '', Number(r.ok) || 0, Number(r.status) || 0, Number(r.prompt_tokens) || 0, Number(r.completion_tokens) || 0, Number(r.latency_ms) || 0)
+    )
+    if (uBatch.length > 0) await env.DB.batch(uBatch)
+  } else {
+    throw new Error('Missing DB / PG binding')
+  }
 
   // 强制登出所有会话: 导入/恢复可能改变数据, 要求重新登录
   await deleteAllSessions(env)
@@ -175,17 +203,13 @@ export interface TelegramConfig {
 }
 
 export async function getTgConfig(env: Env): Promise<TelegramConfig | null> {
-  if (!env.DB) return null
-  const res = await env.DB.prepare("SELECT value FROM kv_store WHERE key = 'telegram:backup'").first<{ value: string }>()
-  if (!res || !res.value) return null
-  try { return JSON.parse(res.value) as TelegramConfig } catch { return null }
+  const res = await getKV(env).get('telegram:backup')
+  if (!res) return null
+  try { return JSON.parse(res) as TelegramConfig } catch { return null }
 }
 
 export async function saveTgConfig(env: Env, botToken: string, chatId: string): Promise<void> {
-  if (!env.DB) return
-  await env.DB.prepare(
-    "INSERT INTO kv_store (key, value) VALUES ('telegram:backup', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  ).bind(JSON.stringify({ botToken, chatId })).run()
+  await getKV(env).put('telegram:backup', JSON.stringify({ botToken, chatId }))
 }
 
 export async function handleTelegramSave(c: Context<{ Bindings: Env }>) {

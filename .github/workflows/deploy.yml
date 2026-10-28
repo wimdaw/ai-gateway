@@ -1,4 +1,4 @@
-name: Deploy to Cloudflare Pages
+name: Deploy to Koyeb
 
 on:
   push:
@@ -9,21 +9,17 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Install Koyeb CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/koyeb/koyeb-cli/master/install.sh | sh
+          echo "$HOME/.koyeb/bin" >> $GITHUB_PATH
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - run: npm install
-
-      - name: Build for Pages
-        run: npm run build:pages
-
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: pages deploy dist --project-name ai-gateway --commit-dirty=true
+      - name: Trigger Koyeb Redeploy
+        env:
+          KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
+        run: |
+          if [ -z "$KOYEB_TOKEN" ]; then
+            echo "::error::KOYEB_TOKEN secret is not set"
+            exit 1
+          fi
+          koyeb service redeploy api/ai-gateway --token "$KOYEB_TOKEN"

@@ -1,20 +1,22 @@
 {
-  "name": "ai-gateway",
+  "name": "ai-gateway-koyeb",
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "hono": "^4.12.27"
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.12.27",
+    "postgres": "^3.4.9"
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "dev": "node scripts/build.mjs && wrangler pages dev dist",
-    "preview": "node scripts/build.mjs && wrangler pages dev dist",
-    "typecheck": "tsc --noEmit",
-    "build:pages": "node scripts/build.mjs",
-    "deploy:pages": "node scripts/build.mjs && wrangler pages deploy dist --project-name ai-gateway"
+    "build": "bun run build:node",
+    "start": "bun dist/bun-server.js",
+    "build:node": "bun scripts/build-node.mjs",
+    "build:pages": "mkdir -p dist && cp -f index.html dist/index.html && echo \"{\\\"version\\\": 1, \\\"include\\\": [\\\"/*\\\"], \\\"exclude\\\": []}\" > dist/_routes.json && esbuild src/index.ts --bundle --format=esm --platform=neutral --target=es2022 --outfile=dist/_worker.js",
+    "deploy:pages": "npm run build:pages && wrangler pages deploy dist --project-name ai-gateway"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260702.1",
+    "@types/node": "^26.5.1",
     "esbuild": "^0.28.2",
     "typescript": "^5.9.2",
     "wrangler": "^4.107.0"

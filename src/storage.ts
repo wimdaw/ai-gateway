@@ -1,31 +1,60 @@
 import { KV_KEYS } from './config'
 import type { Env, Provider, ProxyKey, Session } from './types'
-import { getKV, addUsageRecordD1 } from './storage-adapter'
+import { getKV, addUsageRecordD1, addUsageRecordPG, getUsageSummaryPG } from './storage-adapter'
 
 // ===== 提供商 CRUD =====
 
 // 进程内缓存: providers 可达 MB 级(万级 Key), 每次请求都远端读取+解析代价过高。
-// 但缓存必须带过期时间: 该变量是 isolate 级的, 管理端在 A isolate 改完渠道后,
-// B isolate 会一直沿用旧列表 —— 实测在部署切换期出现过「刚创建的渠道在另一个
-// isolate 上查不到 / 删除返回 404」。30s TTL 把不一致窗口收敛到可接受范围,
-// 同时每个 isolate 最多每 30s 读一次存储, 开销可忽略。
+// 但缓存必须带过期时间: 一旦实例被横向扩容(或容器重启期间新旧实例并存),
+// 别的实例写完渠道后本实例会一直沿用旧列表 —— 实测出现过「刚创建的渠道在另一个
+// 实例上查不到 / 删除返回 404」。30s TTL 把不一致窗口收敛到可接受范围。
 const PROVIDERS_CACHE_TTL_MS = 30_000
 
 let providersCache: Provider[] | null = null
 let providersCacheAt = 0
+let providersRefreshing = false
 
 export async function getProviders(env: Env): Promise<Provider[]> {
   const now = Date.now()
   if (providersCache && now - providersCacheAt < PROVIDERS_CACHE_TTL_MS) return providersCache
+  // stale-while-revalidate: 缓存过期时先返回旧数据, 后台静默刷新。
+  // 一次全量读取是 MB 级 JSON(万级 Key)跨公网拉取, 同步等待会把后台页/代理请求
+  // 的 TTFB 拖高数秒; 改造后只有「实例起来后的第一个请求」才同步读一次。
+  // 写路径(readProvidersFresh)依旧强制直读, 多实例一致性窗口不变。
+  if (providersCache) {
+    if (!providersRefreshing) {
+      providersRefreshing = true
+      getKV(env).get(KV_KEYS.PROVIDERS)
+        .then((data) => {
+          providersCache = data ? (JSON.parse(data) as Provider[]) : []
+          providersCacheAt = Date.now()
+        })
+        .catch(() => {})
+        .finally(() => { providersRefreshing = false })
+    }
+    return providersCache
+  }
   const data = await getKV(env).get(KV_KEYS.PROVIDERS)
-  // 显式标注局部类型：JSON.parse 返回 any，直接赋值会把上面的缓存变量重新放宽成 Provider[] | null
   const parsed: Provider[] = data ? (JSON.parse(data) as Provider[]) : []
   providersCache = parsed
   providersCacheAt = now
   return parsed
 }
 
+/**
+ * 供「读-改-写」使用的强制新鲜读取：必须绕过缓存。
+ * 否则别的实例刚写入的渠道会被本次写回整条覆盖掉。
+ */
+async function readProvidersFresh(env: Env): Promise<Provider[]> {
+  const data = await getKV(env).get(KV_KEYS.PROVIDERS)
+  const parsed: Provider[] = data ? (JSON.parse(data) as Provider[]) : []
+  providersCache = parsed
+  providersCacheAt = Date.now()
+  return parsed
+}
+
 export async function getProvider(env: Env, id: string): Promise<Provider | null> {
+  // 纯读路径（代理请求热路径）：走带 TTL 的缓存，不做远端直读
   const providers = await getProviders(env)
   return providers.find((p) => p.id === id) ?? null
 }
@@ -34,22 +63,6 @@ export async function setProviders(env: Env, providers: Provider[]): Promise<voi
   providersCache = providers
   providersCacheAt = Date.now()
   await getKV(env).put(KV_KEYS.PROVIDERS, JSON.stringify(providers))
-}
-
-/**
- * 供「读-改-写」使用的强制新鲜读取：必须绕过 isolate 缓存。
- *
- * 所有渠道写操作都是「读全量 → 改 → 写回」。若读的是 isolate 缓存，
- * 而这份缓存在别的 isolate 刚写完、尚未过期，写回就会把对方的改动**整条覆盖掉**。
- * 实测：A isolate 新建渠道后，B isolate 的删除操作按旧列表写回，新渠道一度被冲掉。
- * 因此写路径一律读最新值；读路径仍走缓存，热路径性能不受影响。
- */
-async function readProvidersFresh(env: Env): Promise<Provider[]> {
-  const data = await getKV(env).get(KV_KEYS.PROVIDERS)
-  const parsed: Provider[] = data ? (JSON.parse(data) as Provider[]) : []
-  providersCache = parsed
-  providersCacheAt = Date.now()
-  return parsed
 }
 
 export async function addProvider(env: Env, provider: Provider): Promise<void> {
@@ -103,6 +116,7 @@ export async function setAdminCredentials(env: Env, username: string, passwordHa
 
 /** 强制登出所有会话(导入/恢复后调用) */
 export async function deleteAllSessions(env: Env): Promise<void> {
+  sessionMem.clear()
   const store = getKV(env)
   let cursor: string | undefined
   do {
@@ -114,6 +128,12 @@ export async function deleteAllSessions(env: Env): Promise<void> {
 
 // ===== Session 管理 =====
 
+// 进程内会话缓存: 管理后台每个请求都要过 adminAuthMiddleware → getSession,
+// 直查 PG 一次往返在跨公网链路上要百余毫秒。内存缓存 5 分钟, 登出/删除即失效,
+// 存储侧会话被外部清掉时最多滞后 5 分钟(与 providers 缓存的不一致窗口同级)。
+const SESSION_MEM_TTL_MS = 5 * 60_000
+const sessionMem = new Map<string, { session: Session; cachedAt: number }>()
+
 export async function createSession(env: Env, username: string, ttlSeconds: number): Promise<string> {
   const sessionId = crypto.randomUUID()
   const session: Session = {
@@ -123,21 +143,33 @@ export async function createSession(env: Env, username: string, ttlSeconds: numb
   await getKV(env).put(KV_KEYS.SESSION_PREFIX + sessionId, JSON.stringify(session), {
     expirationTtl: ttlSeconds,
   })
+  sessionMem.set(sessionId, { session, cachedAt: Date.now() })
   return sessionId
 }
 
 export async function getSession(env: Env, sessionId: string): Promise<Session | null> {
+  const now = Date.now()
+  const hit = sessionMem.get(sessionId)
+  if (hit && now - hit.cachedAt < SESSION_MEM_TTL_MS) {
+    if (hit.session.expiresAt < now) {
+      await deleteSession(env, sessionId)
+      return null
+    }
+    return hit.session
+  }
   const data = await getKV(env).get(KV_KEYS.SESSION_PREFIX + sessionId)
   if (!data) return null
   const session: Session = JSON.parse(data)
-  if (session.expiresAt < Date.now()) {
+  if (session.expiresAt < now) {
     await deleteSession(env, sessionId)
     return null
   }
+  sessionMem.set(sessionId, { session, cachedAt: now })
   return session
 }
 
 export async function deleteSession(env: Env, sessionId: string): Promise<void> {
+  sessionMem.delete(sessionId)
   await getKV(env).delete(KV_KEYS.SESSION_PREFIX + sessionId)
 }
 
@@ -195,7 +227,7 @@ import { USAGE_RETENTION_DAYS } from './config'
 import type { UsageRecord, UsageSummary } from './types'
 
 export async function seedInitialData(env: Env): Promise<void> {
-  const providers = await getProviders(env)
+  const providers = await readProvidersFresh(env)
   const migrationCompleted = await getKV(env).get(KV_KEYS.OPENCODE_MIGRATION)
   const opencode = DEFAULT_PROVIDERS.find((provider) => provider.id === 'opencode')
 
@@ -213,6 +245,30 @@ export async function seedInitialData(env: Env): Promise<void> {
     await getKV(env).put(KV_KEYS.OPENCODE_MIGRATION, '1')
   }
 
+  // Refresh only the untouched legacy OpenCode seed. User-customized model lists are preserved.
+  const modelsMigrationCompleted = await getKV(env).get(KV_KEYS.OPENCODE_MODELS_MIGRATION)
+  if (!modelsMigrationCompleted && opencode) {
+    const currentProviders = await readProvidersFresh(env)
+    const currentOpenCode = currentProviders.find((provider) => provider.id === opencode.id)
+    const legacyIds = new Set([
+      'deepseek-v4-flash-free',
+      'mimo-v2.5-free',
+      'nemotron-3-ultra-free',
+      'hy3-free',
+    ])
+    const isUntouchedSeed = currentOpenCode
+      && currentOpenCode.models.length === legacyIds.size
+      && new Set(currentOpenCode.models.map((model) => model.id)).size === legacyIds.size
+      && currentOpenCode.models.every((model) => legacyIds.has(model.id) && model.enabled && !model.alias)
+
+    if (isUntouchedSeed) {
+      const now = new Date().toISOString()
+      await setProviders(env, currentProviders.map((provider) => provider.id === opencode.id
+        ? { ...provider, models: opencode.models.map((model) => ({ ...model })), updatedAt: now }
+        : provider))
+    }
+    await getKV(env).put(KV_KEYS.OPENCODE_MODELS_MIGRATION, '1')
+  }
   // 仅首次运行时创建测试转发 Key
   if (providers.length === 0 && !migrationCompleted) {
     const keys = await getProxyKeys(env)
@@ -231,8 +287,12 @@ export async function seedInitialData(env: Env): Promise<void> {
 
 // ===== Token 用量统计 =====
 
-/** 写入一条用量记录（直接基于 D1：独立行 + SQL 聚合；旧版 KV 回退已废弃：独立 key + TTL） */
+/** 写入一条用量记录 */
 export async function addUsageRecord(env: Env, record: UsageRecord): Promise<void> {
+  if (env.PG) {
+    await addUsageRecordPG(env.PG, record)
+    return
+  }
   if (env.DB) {
     await addUsageRecordD1(env.DB, record)
     return
@@ -263,8 +323,11 @@ async function listUsageRecords(env: Env, prefix: string): Promise<UsageRecord[]
   return records
 }
 
-/** 聚合最近 N 天的用量（含当天）—— 直接基于 D1：SQL 直接聚合 */
+/** 聚合最近 N 天的用量（含当天） */
 export async function getUsageSummary(env: Env, days: number): Promise<UsageSummary> {
+  if (env.PG) {
+    return await getUsageSummaryPG(env.PG, days)
+  }
   if (env.DB) {
     return await getUsageSummaryD1(env.DB, days)
   }

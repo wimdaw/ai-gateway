@@ -1,6 +1,6 @@
 // Adapted from OmniRoute's DuckDuckGo challenge solver (MIT license).
 // The upstream challenge runs in a memory- and time-limited QuickJS WASM sandbox.
-import { getQuickJSWASMModule, shouldInterruptAfterDeadline } from '@cf-wasm/quickjs/workerd'
+import { getQuickJSWASMModule, shouldInterruptAfterDeadline } from '@cf-wasm/quickjs/node'
 import { parseFragment, serialize } from "parse5";
 
 // WARNING: the contents of this template literal are NOT TypeScript — they are plain

@@ -1,11 +1,9 @@
-// scripts/build.mjs — 跨平台构建脚本（原 package.json 里的 build:pages 用了 mkdir/cp/echo 等
-// Unix 命令，在 Windows 上无法执行；这里改成纯 Node 实现，任何平台都能跑：node scripts/build.mjs）
+// scripts/build-node.mjs — Koyeb Node 版构建脚本（对齐 CF Pages 项目的「静态资源外链化」架构）
 //
-// 本脚本同时负责「静态资源外链化」：
-//   1. 从 src/pages.css.ts 抽出 CSS、从 src/shared.js.ts / src/admin.script.ts 抽出客户端脚本；
+//   1. 从 src/pages.css.ts / src/shared.js.ts / src/admin.script.ts 抽出 CSS 与客户端脚本；
 //   2. 压缩（保留顶层函数名 —— 页面里有大量内联 onclick="foo()" 依赖全局名）；
-//   3. 按内容哈希命名写入 dist/assets/，并通过 esbuild --define 把 URL 注入 worker；
-//   4. 生成 _headers（/assets/* 一年期不可变缓存）与 _routes.json（静态资源绕过 worker）。
+//   3. 按内容哈希命名写入 dist/assets/，并通过 esbuild --define 把 URL 注入 server bundle；
+//   4. src/node.ts 在运行时直接从 dist/assets/ 提供这些文件（immutable 一年期缓存）。
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -23,7 +21,7 @@ const esbuild = await import('esbuild').catch(() =>
 async function evalExport(relPath, exportName) {
   const source = readFileSync(join(root, relPath), 'utf8')
   const { code } = await esbuild.transform(source, { loader: 'ts', format: 'esm' })
-  const tmp = join(tmpdir(), 'ai-gateway-build-' + Math.random().toString(36).slice(2) + '.mjs')
+  const tmp = join(tmpdir(), 'ai-gateway-koyeb-build-' + Math.random().toString(36).slice(2) + '.mjs')
   writeFileSync(tmp, code, 'utf8')
   try {
     const mod = await import(pathToFileURL(tmp).href)
@@ -62,23 +60,36 @@ const adminJs = (await esbuild.transform(rawAdmin, jsOpts)).code
 const cssAsset = emitAsset('app', 'css', css)
 const sharedAsset = emitAsset('shared', 'js', sharedJs)
 const adminAsset = emitAsset('admin', 'js', adminJs)
-
-// ── 2) 静态资源缓存策略与路由 ────────────────────────────────────────────────
-writeFileSync(join(dist, '_headers'),
-  '/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n', 'utf8')
-writeFileSync(join(dist, '_routes.json'),
-  JSON.stringify({ version: 1, include: ['/*'], exclude: ['/assets/*'] }, null, 2) + '\n', 'utf8')
 copyFileSync(join(root, 'index.html'), join(dist, 'index.html'))
 
-// ── 3) 打包 worker，注入资源 URL ─────────────────────────────────────────────
+// ── 2) 打包 Node server，注入资源 URL ────────────────────────────────────────
 await esbuild.build({
-  entryPoints: [join(root, 'src', 'index.ts')],
+  entryPoints: [join(root, 'src', 'node.ts')],
   bundle: true,
   format: 'esm',
-  platform: 'neutral',
-  target: 'es2022',
-  external: ['cloudflare:*', 'node:*'],
-  outfile: join(dist, '_worker.js'),
+  platform: 'node',
+  target: 'node18',
+  inject: [join(root, 'src', 'polyfill.ts')],
+  outfile: join(dist, 'server.js'),
+  define: {
+    __ASSET_CSS__: JSON.stringify(cssAsset.url),
+    __ASSET_SHARED_JS__: JSON.stringify(sharedAsset.url),
+    __ASSET_ADMIN_JS__: JSON.stringify(adminAsset.url),
+  },
+  logLevel: 'warning',
+})
+
+// ── 2.5) 打包 Bun server（Koyeb 生产入口）───────────────────────────────────
+// 必须用 Bun 出网：opencode.ai 免费池门禁3 只认 Bun/BoringSSL 的 17-cipher
+// ClientHello，Node 的 OpenSSL 指纹一律 429。同一进程也承担 TLS 中继职责。
+await esbuild.build({
+  entryPoints: [join(root, 'src', 'bun.ts')],
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  target: 'node20',
+  inject: [join(root, 'src', 'polyfill.ts')],
+  outfile: join(dist, 'bun-server.js'),
   define: {
     __ASSET_CSS__: JSON.stringify(cssAsset.url),
     __ASSET_SHARED_JS__: JSON.stringify(sharedAsset.url),
@@ -91,5 +102,6 @@ const kb = (n) => (n / 1024).toFixed(1) + ' KiB'
 console.log('资源   ' + cssAsset.url + '  ' + kb(cssAsset.bytes) + '  (原始 ' + kb(Buffer.byteLength(rawCss)) + ')')
 console.log('       ' + sharedAsset.url + '  ' + kb(sharedAsset.bytes))
 console.log('       ' + adminAsset.url + '  ' + kb(adminAsset.bytes) + '  (原始 ' + kb(Buffer.byteLength(rawAdmin)) + ')')
-console.log('worker ' + kb(readFileSync(join(dist, '_worker.js')).length))
+console.log('server ' + kb(readFileSync(join(dist, 'server.js')).length))
+console.log('bun    ' + kb(readFileSync(join(dist, 'bun-server.js')).length))
 console.log('构建完成 -> ' + dist)
