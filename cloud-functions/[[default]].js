@@ -17166,13 +17166,31 @@ ${block}`;
   }
   messages.unshift({ role: "system", content: block });
 }
+var OPENCODE_BLOCKED_TOOL_PATTERNS = ["getworkflowrun", "fillworkflowhole"];
+function isBlockedClientTool(tool) {
+  const name = String(tool?.function?.name ?? tool?.name ?? "").toLowerCase();
+  return name.length > 0 && OPENCODE_BLOCKED_TOOL_PATTERNS.some((pattern) => name.includes(pattern));
+}
 function ensureOpenCodeCompat(payload) {
   const messages = Array.isArray(payload?.messages) ? payload.messages : null;
   if (!messages || messages.length === 0) return;
   const tools = Array.isArray(payload.tools) ? payload.tools : [];
   const hasClientTools = tools.length > 0;
   const officialNames = new Set(OPENCODE_OFFICIAL_TOOLS.map((tool) => tool.function.name));
-  const clientTools = tools.filter((tool) => !officialNames.has(tool?.function?.name ?? tool?.name));
+  const blockedNames = /* @__PURE__ */ new Set();
+  const clientTools = tools.filter((tool) => {
+    const name = tool?.function?.name ?? tool?.name;
+    if (officialNames.has(name)) return false;
+    if (isBlockedClientTool(tool)) {
+      if (typeof name === "string") blockedNames.add(name);
+      return false;
+    }
+    return true;
+  });
+  const forcedName = payload?.tool_choice?.function?.name ?? payload?.tool_choice?.name;
+  if (typeof forcedName === "string" && blockedNames.has(forcedName)) {
+    payload.tool_choice = clientTools.length > 0 ? "auto" : "none";
+  }
   const alreadyPrepended = clientTools.length === tools.length && tools.length >= OPENCODE_OFFICIAL_TOOLS.length && OPENCODE_OFFICIAL_TOOLS.every((official, index) => officialToolKey(tools[index]) === officialToolKey(official));
   if (!alreadyPrepended) {
     payload.tools = [...OPENCODE_OFFICIAL_TOOLS.map((tool) => JSON.parse(JSON.stringify(tool))), ...clientTools];
