@@ -1,0 +1,41 @@
+name: Deploy to EdgeOne
+
+on:
+  push:
+    branches: [edgeone]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to EdgeOne
+        env:
+          EDGEONE_TOKEN: ${{ secrets.EDGEONE_TOKEN }}
+        run: |
+          if [ -z "$EDGEONE_TOKEN" ]; then
+            echo "::error::EDGEONE_TOKEN secret is not set"
+            exit 1
+          fi
+          # ai-gateway-intl 是 direct upload 类型项目，用 EdgeOne CLI 直传；
+          # 原生 GitHub 联动只支持 Git 类型项目，故采用 Actions + CLI。
+          npx --no-install edgeone makers deploy \
+            -t "$EDGEONE_TOKEN" \
+            -n ai-gateway-intl \
+            -e production \
+            -a overseas \
+            --json \
+            --skip-ai-gateway-sync
