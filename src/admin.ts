@@ -639,7 +639,9 @@ export async function handleTestKeyNew(c: Context<{ Bindings: Env }>) {
         success: result.success,
         statusCode: result.statusCode || 0,
         message: result.message,
-        data: freeOnly ? filterFreeModels(result.data) : result.data,
+        // fetchOpenCodeModels 已按开放免费池规则过滤（-free 或 big-pickle），
+        // 不能再叠加 filterFreeModels —— 那里按 id 含 "free" 判断，会把 big-pickle 误删。
+        data: result.data,
       },
     })
   }

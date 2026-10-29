@@ -4,7 +4,7 @@ import { logger } from 'hono/logger'
 import type { Env } from './types'
 import { adminAuthMiddleware, proxyKeyAuthMiddleware, handleLogin, handleLogout } from './auth'
 import { handleProxy, handleModels } from './llm-proxy'
-import { OPENCODE_RELAY_TOKEN_DEFAULT } from './opencode'
+import { OPENCODE_RELAY_TOKEN_DEFAULT, getOpenCodeRuntimeDiagnostics } from './opencode'
 import {
   handleStatus,
   handleGetProviders,
@@ -177,6 +177,11 @@ app.get('/admin/api/selftest/delay', (c) => {
   return new Promise<Response>((resolve) => {
     setTimeout(() => resolve(c.json({ success: true, data: { requestedMs: ms, actualMs: Date.now() - startedAt } })), ms)
   })
+})
+
+// 部署后自检: opencode 的 wreq-js 原生 TLS 通道是否就绪（false 时所有免费模型必然 429）
+app.get('/admin/api/selftest/opencode', async (c) => {
+  return c.json({ success: true, data: await getOpenCodeRuntimeDiagnostics() })
 })
 
 // 部署后自检(流式): 每 tick 吐一个字节, 用于区分「总时长上限」与「无数据超时」

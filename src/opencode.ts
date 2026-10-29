@@ -164,11 +164,17 @@ function getMirrorOrder(urls: string[], random: () => number): string[] {
 }
 
 function buildUrl(baseUrl: string, subPath: string, search = ''): string {
-  // 官方源站（opencode.ai）最新 2.1.4 体系的 OpenAI 兼容端点在 /inference/openai/v1；
+  // 官方源站（opencode.ai）最新 2.1.4 体系：
+  //  - 对话端点挂在 OpenAI 兼容的 /inference/openai/v1；
+  //  - 模型列表端点只挂在 /inference/v1（及历史 /zen/v1），/inference/openai/v1/models 返回 404
+  //    （2026-10-29 实证），必须按路径分流，否则「获取模型」同步永远失败。
   // 第三方镜像源（如 cmliussss）通常保持 /zen/v1 代理。
   const isOfficial = /https?:\/\/opencode\.ai(?::\d+)?(?=\/|$)/i.test(baseUrl)
+  const isModels = subPath === 'models' || subPath === '/models'
   const normalized = isOfficial
-    ? baseUrl.replace(/\/zen\/v1(?=\/|$)/, '/inference/openai/v1').replace(/\/inference\/v1(?=\/|$)/, '/inference/openai/v1')
+    ? isModels
+      ? baseUrl.replace(/\/zen\/v1(?=\/|$)/, '/inference/v1').replace(/\/inference\/openai\/v1(?=\/|$)/, '/inference/v1')
+      : baseUrl.replace(/\/zen\/v1(?=\/|$)/, '/inference/openai/v1').replace(/\/inference\/v1(?=\/|$)/, '/inference/openai/v1')
     : baseUrl
   return `${normalized.replace(/\/+$/, '')}/${subPath.replace(/^\/+/, '')}${search}`
 }
@@ -312,6 +318,7 @@ const OPENCODE_CIPHER_LIST = [
 
 let cachedWreq: any = null
 let cachedTransport: any = null
+let cachedWreqError: string | null = null
 
 async function getWreqModule() {
   if (cachedWreq !== null) return cachedWreq
@@ -324,10 +331,28 @@ async function getWreqModule() {
       readTimeout: 300000,
     })
     cachedWreq = { ...mod, createTransport, fetch: fetchFn }
-  } catch {
+  } catch (err) {
+    cachedWreqError = err instanceof Error ? err.message : String(err)
     cachedWreq = false
   }
   return cachedWreq
+}
+
+/**
+ * 运行时自检（管理员会话可见）：wreq-js 原生 TLS 通道是否可用。
+ * 若 wreqLoaded=false，则所有官方源站请求会退化成平台默认 TLS，
+ * 必然被免费层门禁 3 拒绝（表现为全渠道 FreeUsageLimitError 429），
+ * 需检查部署包是否带上 @wreq-js/binding-linux-x64-gnu 外部模块。
+ */
+export async function getOpenCodeRuntimeDiagnostics(): Promise<Record<string, unknown>> {
+  await getWreqModule()
+  return {
+    wreqLoaded: Boolean(cachedWreq),
+    wreqError: cachedWreqError,
+    transportReady: Boolean(cachedTransport),
+    nodeVersion: typeof process !== 'undefined' ? process.version : null,
+    platform: typeof process !== 'undefined' ? `${process.platform}/${process.arch}` : null,
+  }
 }
 
 async function requestUpstream(

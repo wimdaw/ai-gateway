@@ -17131,7 +17131,8 @@ function getMirrorOrder(urls, random) {
 }
 function buildUrl(baseUrl, subPath, search = "") {
   const isOfficial = /https?:\/\/opencode\.ai(?::\d+)?(?=\/|$)/i.test(baseUrl);
-  const normalized = isOfficial ? baseUrl.replace(/\/zen\/v1(?=\/|$)/, "/inference/openai/v1").replace(/\/inference\/v1(?=\/|$)/, "/inference/openai/v1") : baseUrl;
+  const isModels = subPath === "models" || subPath === "/models";
+  const normalized = isOfficial ? isModels ? baseUrl.replace(/\/zen\/v1(?=\/|$)/, "/inference/v1").replace(/\/inference\/openai\/v1(?=\/|$)/, "/inference/v1") : baseUrl.replace(/\/zen\/v1(?=\/|$)/, "/inference/openai/v1").replace(/\/inference\/v1(?=\/|$)/, "/inference/openai/v1") : baseUrl;
   return `${normalized.replace(/\/+$/, "")}/${subPath.replace(/^\/+/, "")}${search}`;
 }
 var OPENCODE_TITLE_PROBE = OPENCODE_TITLE_MARKER.slice(0, 80);
@@ -17242,6 +17243,7 @@ var OPENCODE_CIPHER_LIST = [
 ].join(":");
 var cachedWreq = null;
 var cachedTransport = null;
+var cachedWreqError = null;
 async function getWreqModule() {
   if (cachedWreq !== null) return cachedWreq;
   try {
@@ -17253,10 +17255,21 @@ async function getWreqModule() {
       readTimeout: 3e5
     });
     cachedWreq = { ...mod, createTransport, fetch: fetchFn };
-  } catch {
+  } catch (err) {
+    cachedWreqError = err instanceof Error ? err.message : String(err);
     cachedWreq = false;
   }
   return cachedWreq;
+}
+async function getOpenCodeRuntimeDiagnostics() {
+  await getWreqModule();
+  return {
+    wreqLoaded: Boolean(cachedWreq),
+    wreqError: cachedWreqError,
+    transportReady: Boolean(cachedTransport),
+    nodeVersion: typeof process !== "undefined" ? process.version : null,
+    platform: typeof process !== "undefined" ? `${process.platform}/${process.arch}` : null
+  };
 }
 async function requestUpstream(fetcher, url, apiKey, options, sessionId, relayToken) {
   const wreq = await getWreqModule();
@@ -24795,7 +24808,9 @@ async function handleTestKeyNew(c) {
         success: result.success,
         statusCode: result.statusCode || 0,
         message: result.message,
-        data: freeOnly ? filterFreeModels(result.data) : result.data
+        // fetchOpenCodeModels 已按开放免费池规则过滤（-free 或 big-pickle），
+        // 不能再叠加 filterFreeModels —— 那里按 id 含 "free" 判断，会把 big-pickle 误删。
+        data: result.data
       }
     });
   }
@@ -25979,6 +25994,9 @@ app.get("/admin/api/selftest/delay", (c) => {
   return new Promise((resolve) => {
     setTimeout(() => resolve(c.json({ success: true, data: { requestedMs: ms, actualMs: Date.now() - startedAt } })), ms);
   });
+});
+app.get("/admin/api/selftest/opencode", async (c) => {
+  return c.json({ success: true, data: await getOpenCodeRuntimeDiagnostics() });
 });
 app.get("/admin/api/selftest/stream", (c) => {
   const ms = Math.min(Math.max(Number(c.req.query("ms")) || 0, 0), 9e5);
