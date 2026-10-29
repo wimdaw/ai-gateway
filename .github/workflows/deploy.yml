@@ -9,11 +9,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Koyeb CLI
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/koyeb/koyeb-cli/master/install.sh | sh
-          echo "$HOME/.koyeb/bin" >> $GITHUB_PATH
-
       - name: Trigger Koyeb Redeploy
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
@@ -22,4 +17,8 @@ jobs:
             echo "::error::KOYEB_TOKEN secret is not set"
             exit 1
           fi
-          koyeb service redeploy api/ai-gateway --token "$KOYEB_TOKEN"
+          # 直接用 Koyeb API 触发重部署，避免 CLI 安装脚本在 Actions 中失败
+          curl -fsS -X POST "https://app.koyeb.com/v1/services/1885a91f-4dd4-4e05-8388-19c90ffcf5cb/redeploy" \
+            -H "Authorization: Bearer $KOYEB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{}'
