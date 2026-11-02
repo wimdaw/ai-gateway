@@ -90,12 +90,11 @@ export interface OpenCodeRelayConfig {
  * TLS 中继令牌。Pages / EdgeOne 的出口 TLS 由平台决定，拿不到 Bun 的 17-cipher
  * 指纹，必然 429；把请求转给跑在 Bun 上的 Koyeb 端代发。可用环境变量覆盖。
  */
-export const OPENCODE_RELAY_URL_DEFAULT = 'https://oc-relay.cnz.indevs.in'
 export const OPENCODE_RELAY_TOKEN_DEFAULT = 'oc_relay_997b1a722f4e4cf3a153852eb1554cef'
 
 /** 读取 OPENCODE_RELAY_URL 配置；未配置返回 null（表示直连官方源站）。 */
 export function resolveOpenCodeRelay(env: Env): OpenCodeRelayConfig | null {
-  const url = (env.OPENCODE_RELAY_URL || '').trim() || OPENCODE_RELAY_URL_DEFAULT
+  const url = (env.OPENCODE_RELAY_URL || '').trim()
   if (!url) return null
   return {
     url: url.replace(/\/+$/, ''),
@@ -712,9 +711,10 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
         }
         return response
       }
-      return sanitizeFailureResponse(await storeFailure(response))
+      // 中继失败（如 429 额度耗尽或本机关机），不直接中断，保留失败记录并继续降级尝试平台直连与镜像源
+      officialFailure = await storeFailure(response)
     } catch (error) {
-      return transportErrorResponse(error)
+      lastTransportError = error
     }
   }
 
