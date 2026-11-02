@@ -90,7 +90,7 @@ export interface OpenCodeRelayConfig {
  * TLS 中继令牌。Pages / EdgeOne 的出口 TLS 由平台决定，拿不到 Bun 的 17-cipher
  * 指纹，必然 429；把请求转给跑在 Bun 上的 Koyeb 端代发。可用环境变量覆盖。
  */
-export const OPENCODE_RELAY_TOKEN_DEFAULT = 'oc_relay_997b1a722f4e4cf3a153852eb1554cef'
+export const OPENCODE_RELAY_TOKEN_DEFAULT = 'oc_relay_2f4c8a1d6b9e3f70c5a2d84b1e6f9073'
 
 /** 读取 OPENCODE_RELAY_URL 配置；未配置返回 null（表示直连官方源站）。 */
 export function resolveOpenCodeRelay(env: Env): OpenCodeRelayConfig | null {
@@ -164,11 +164,6 @@ function getMirrorOrder(urls: string[], random: () => number): string[] {
 }
 
 function buildUrl(baseUrl: string, subPath: string, search = ''): string {
-  // 官方源站（opencode.ai）最新 2.1.4 体系：
-  //  - 对话端点挂在 OpenAI 兼容的 /inference/openai/v1；
-  //  - 模型列表端点只挂在 /inference/v1（及历史 /zen/v1），/inference/openai/v1/models 返回 404
-  //    （2026-10-29 实证），必须按路径分流，否则「获取模型」同步永远失败。
-  // 第三方镜像源（如 cmliussss）通常保持 /zen/v1 代理。
   const isOfficial = /https?:\/\/opencode\.ai(?::\d+)?(?=\/|$)/i.test(baseUrl)
   const isModels = subPath === 'models' || subPath === '/models'
   const normalized = isOfficial
@@ -383,54 +378,6 @@ function transportErrorResponse(error: unknown): Response {
   })
 }
 
-const OPENCODE_CIPHER_LIST = [
-  'TLS_AES_128_GCM_SHA256',
-  'TLS_AES_256_GCM_SHA384',
-  'TLS_CHACHA20_POLY1305_SHA256',
-  'ECDHE-ECDSA-AES128-GCM-SHA256',
-  'ECDHE-RSA-AES128-GCM-SHA256',
-  'ECDHE-ECDSA-AES256-GCM-SHA384',
-  'ECDHE-RSA-AES256-GCM-SHA384',
-  'ECDHE-ECDSA-CHACHA20-POLY1305',
-  'ECDHE-RSA-CHACHA20-POLY1305',
-  'ECDHE-ECDSA-AES128-SHA',
-  'ECDHE-RSA-AES128-SHA',
-  'ECDHE-ECDSA-AES256-SHA',
-  'ECDHE-RSA-AES256-SHA',
-  'AES128-GCM-SHA256',
-  'AES256-GCM-SHA384',
-  'AES128-SHA',
-  'AES256-SHA',
-].join(':')
-
-let cachedWreq: any = null
-let cachedTransport: any = null
-let cachedWreqError: string | null = null
-
-async function getWreqModule() {
-  if (cachedWreq !== null) return cachedWreq
-  try {
-    const mod = await cachedWreq = false }
-  return cachedWreq
-}
-
-/**
- * 运行时自检（管理员会话可见）：wreq-js 原生 TLS 通道是否可用。
- * 若 wreqLoaded=false，则所有官方源站请求会退化成平台默认 TLS，
- * 必然被免费层门禁 3 拒绝（表现为全渠道 FreeUsageLimitError 429），
- * 需检查部署包是否带上 @wreq-js/binding-linux-x64-gnu 外部模块。
- */
-export async function getOpenCodeRuntimeDiagnostics(): Promise<Record<string, unknown>> {
-  await getWreqModule()
-  return {
-    wreqLoaded: Boolean(cachedWreq),
-    wreqError: cachedWreqError,
-    transportReady: Boolean(cachedTransport),
-    nodeVersion: typeof process !== 'undefined' ? process.version : null,
-    platform: typeof process !== 'undefined' ? `${process.platform}/${process.arch}` : null,
-  }
-}
-
 async function requestUpstream(
   fetcher: typeof fetch,
   url: string,
@@ -439,36 +386,6 @@ async function requestUpstream(
   sessionId: string,
   relayToken?: string
 ): Promise<Response> {
-  const wreq = await getWreqModule()
-  if (wreq && !relayToken) {
-    // EdgeOne 原生模式：直接在 Node.js 20 容器内下发 Bun 17-cipher ClientHello 直连官方源站
-    const reqHeaders: Record<string, string> = {}
-    createRequestHeaders(apiKey, sessionId).forEach((val, key) => {
-      reqHeaders[key] = val
-    })
-    const upstream = await wreq.fetch(url, {
-      method: options.method,
-      headers: reqHeaders,
-      body: options.method === 'GET' || options.method === 'HEAD' ? undefined : options.body,
-      transport: cachedTransport,
-      timeout: OPENCODE_TIMEOUT_MS,
-    })
-    const respHeaders = new Headers()
-    if (upstream.headers && typeof upstream.headers.forEach === 'function') {
-      upstream.headers.forEach((val: string, key: string) => {
-        const lower = key.toLowerCase()
-        if (lower !== 'content-length' && lower !== 'content-encoding') {
-          respHeaders.set(key, val)
-        }
-      })
-    }
-    return new Response(upstream.body, {
-      status: upstream.status,
-      statusText: upstream.statusText,
-      headers: respHeaders,
-    })
-  }
-
   return fetcher(url, {
     method: options.method,
     headers: createRequestHeaders(apiKey, sessionId, relayToken),
@@ -700,7 +617,6 @@ export async function proxyOpenCodeRequest(options: OpenCodeRequestOptions): Pro
         }
         return response
       }
-      // 中继失败（如 429 额度耗尽或本机关机），不直接中断，保留失败记录并继续降级尝试平台直连与镜像源
       officialFailure = await storeFailure(response)
     } catch (error) {
       lastTransportError = error
