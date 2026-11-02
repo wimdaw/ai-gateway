@@ -92,6 +92,27 @@ app.get('/admin/logout', handleLogout)
 // ===== 健康检查（公开无鉴权，供探活使用） =====
 app.get('/api/ping', (c) => c.text('ok'))
 
+// 部署自检：确认容器实际运行时与出网 IP（TLS 门禁排查用，不含任何凭据）
+app.get('/api/runtime', async (c) => {
+  const g = globalThis as any
+  let egressIp = ''
+  let egressError = ''
+  try {
+    const r = await fetch('https://api.ipify.org?format=json')
+    egressIp = await r.text()
+  } catch (err) {
+    egressError = (err as Error).message
+  }
+  return c.json({
+    bun: typeof g.Bun,
+    bunVersion: g.Bun?.version || '',
+    nodeVersion: (globalThis as any).process?.version || '',
+    versions: (globalThis as any).process?.versions || {},
+    egressIp,
+    egressError,
+  })
+})
+
 // ===== 管理后台（需 Session 验证） =====
 app.use('/admin/*', adminAuthMiddleware)
 
