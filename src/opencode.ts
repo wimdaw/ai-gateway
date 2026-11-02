@@ -90,11 +90,12 @@ export interface OpenCodeRelayConfig {
  * TLS 中继令牌。Pages / EdgeOne 的出口 TLS 由平台决定，拿不到 Bun 的 17-cipher
  * 指纹，必然 429；把请求转给跑在 Bun 上的 Koyeb 端代发。可用环境变量覆盖。
  */
-export const OPENCODE_RELAY_TOKEN_DEFAULT = 'oc_relay_2f4c8a1d6b9e3f70c5a2d84b1e6f9073'
+export const OPENCODE_RELAY_URL_DEFAULT = 'https://oc-relay.cnz.indevs.in'
+export const OPENCODE_RELAY_TOKEN_DEFAULT = 'oc_relay_997b1a722f4e4cf3a153852eb1554cef'
 
 /** 读取 OPENCODE_RELAY_URL 配置；未配置返回 null（表示直连官方源站）。 */
 export function resolveOpenCodeRelay(env: Env): OpenCodeRelayConfig | null {
-  const url = (env.OPENCODE_RELAY_URL || '').trim()
+  const url = (env.OPENCODE_RELAY_URL || '').trim() || OPENCODE_RELAY_URL_DEFAULT
   if (!url) return null
   return {
     url: url.replace(/\/+$/, ''),
@@ -239,13 +240,71 @@ function isBlockedClientTool(tool: any): boolean {
 }
 
 export function ensureOpenCodeCompat(payload: any): void {
-  const messages = Array.isArray(payload?.messages) ? payload.messages : null
-  if (!messages || messages.length === 0) return
+  if (!payload || typeof payload !== 'object') return
 
-  const tools = Array.isArray(payload.tools) ? payload.tools as any[] : []
+  // 1. 安全裁切 max_completion_tokens / max_tokens（防止客户端发出 384000 等超大值导致上游报 400 拒绝）
+  const MAX_SAFE_TOKENS = 65536
+  if (typeof payload.max_completion_tokens === 'number') {
+    if (payload.max_completion_tokens > MAX_SAFE_TOKENS) {
+      payload.max_completion_tokens = MAX_SAFE_TOKENS
+    }
+  }
+  if (typeof payload.max_tokens === 'number') {
+    if (payload.max_tokens > MAX_SAFE_TOKENS) {
+      payload.max_tokens = MAX_SAFE_TOKENS
+    }
+  }
+
+  // 2. 清理某些模型/上游不认识的非标准 Anthropic thinking 参数
+  if (payload.thinking !== undefined) {
+    delete payload.thinking
+  }
+
+  // 3. 消息规范化与多 System 消息合并（支持 WorkBuddy、ZCode 等所有 Agent）
+  // 官方 CLI 仅有单条 system 消息；若有多条或含 developer 角色，上游会判定为非法客户端 (429/422)。
+  const rawMessages = Array.isArray(payload.messages) ? payload.messages : []
+  if (rawMessages.length === 0) return
+
+  const systemTexts: string[] = []
+  const otherMessages: any[] = []
+
+  for (const msg of rawMessages) {
+    if (!msg) continue
+    const role = msg.role
+    if (role === 'system' || role === 'developer') {
+      if (typeof msg.content === 'string') {
+        if (msg.content.trim()) systemTexts.push(msg.content)
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (typeof part === 'string' && part.trim()) {
+            systemTexts.push(part)
+          } else if (part?.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
+            systemTexts.push(part.text)
+          }
+        }
+      }
+    } else {
+      otherMessages.push(msg)
+    }
+  }
+
+  const compatBlock = buildCompatBlock(OPENCODE_CLI_MARKER)
+  const containsProbe = (s: string) => typeof s === 'string' && s.includes(OPENCODE_CLI_PROBE)
+  const alreadyInjected = systemTexts.some(containsProbe)
+
+  let mergedSystemText = systemTexts.join('\n\n')
+  if (!alreadyInjected) {
+    mergedSystemText = mergedSystemText ? `${mergedSystemText}\n\n${compatBlock}` : compatBlock
+  }
+
+  payload.messages = [
+    { role: 'system', content: mergedSystemText },
+    ...otherMessages,
+  ]
+
+  // 4. 工具集处理：前置官方 11 工具并去重
+  const tools = Array.isArray(payload.tools) ? (payload.tools as any[]) : []
   const hasClientTools = tools.length > 0
-  // 客户端工具与官方工具同名时，上游会以 "must not be specified more than once" 400 拒绝，
-  // 因此这里剔除客户端的重名项（官方定义必须保留，它是免费层校验依据）。
   const officialNames = new Set(OPENCODE_OFFICIAL_TOOLS.map((tool) => tool.function.name))
   const blockedNames = new Set<string>()
   const clientTools = tools.filter((tool) => {
@@ -257,23 +316,25 @@ export function ensureOpenCodeCompat(payload: any): void {
     }
     return true
   })
-  // 客户端强制指定了被剔除的工具时，tool_choice 会指向不存在的函数导致 400，这里降级为 auto。
+
+  // 客户端强制指定了被剔除的工具时，tool_choice 降级为 auto/none
   const forcedName = payload?.tool_choice?.function?.name ?? payload?.tool_choice?.name
   if (typeof forcedName === 'string' && blockedNames.has(forcedName)) {
     payload.tool_choice = clientTools.length > 0 ? 'auto' : 'none'
   }
+
   const alreadyPrepended =
     clientTools.length === tools.length &&
     tools.length >= OPENCODE_OFFICIAL_TOOLS.length &&
     OPENCODE_OFFICIAL_TOOLS.every((official, index) => officialToolKey(tools[index]) === officialToolKey(official))
+
   if (!alreadyPrepended) {
     payload.tools = [...OPENCODE_OFFICIAL_TOOLS.map((tool) => JSON.parse(JSON.stringify(tool))), ...clientTools]
   }
-  if (!hasClientTools && payload.tool_choice === undefined) {
+
+  if (!hasClientTools && (payload.tool_choice === undefined || payload.tool_choice === 'auto')) {
     payload.tool_choice = 'none'
   }
-
-  injectCompatMarker(messages, buildCompatBlock(OPENCODE_CLI_MARKER), OPENCODE_CLI_PROBE)
 }
 
 function createRequestHeaders(apiKey: string, sessionId: string, relayToken?: string): Headers {
