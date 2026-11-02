@@ -92,6 +92,37 @@ app.get('/admin/logout', handleLogout)
 // ===== 健康检查（公开无鉴权，供探活使用） =====
 app.get('/api/ping', (c) => c.text('ok'))
 
+// 部署自检：从本容器直连 opencode 官方源站，确认 TLS 指纹与出网 IP 是否被门禁放行
+app.get('/api/test-opencode', async (c) => {
+  const { ensureOpenCodeCompat } = await import('./opencode')
+  const payload: any = { model: 'big-pickle', messages: [{ role: 'user', content: 'hi' }], stream: true }
+  ensureOpenCodeCompat(payload)
+  const sid = 'ses_e6652db18ffe1rfeQqHkAeApoq'
+  const started = Date.now()
+  try {
+    const r = await fetch('https://opencode.ai/inference/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'authorization': 'Bearer public',
+        'user-agent': 'opencode/latest/2.2.2/desktop',
+        'x-opencode-client': 'desktop',
+        'x-opencode-project': 'global',
+        'x-opencode-session': sid,
+        'x-opencode-session-id': sid,
+        'x-session-affinity': sid,
+        'x-session-id': sid,
+        'accept': '*/*',
+      },
+      body: JSON.stringify(payload),
+    })
+    const text = await r.text()
+    return c.json({ status: r.status, ms: Date.now() - started, body: text.slice(0, 300) })
+  } catch (err) {
+    return c.json({ status: 0, ms: Date.now() - started, error: (err as Error).message })
+  }
+})
+
 // 部署自检：确认容器实际运行时与出网 IP（TLS 门禁排查用，不含任何凭据）
 app.get('/api/runtime', async (c) => {
   const g = globalThis as any
