@@ -628,7 +628,7 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
     }
 
     if (isOpenCodeProvider(providerId)) {
-      const response = await proxyOpenCodeRequest({
+      let response = await proxyOpenCodeRequest({
         baseUrl: provider.baseUrl,
         apiKeys: enabledKeys,
         method: c.req.method,
@@ -638,6 +638,46 @@ export async function handleProxy(c: Context<{ Bindings: Env }>) {
         mirrorUrls: resolveProviderMirrorUrls(c.env, provider),
         relay: resolveOpenCodeRelay(c.env),
       })
+
+      // 智能容灾兜底：当 OpenCode 免费池报 429 免费额度超限/风控时，自动转由已配置的零扣费同款模型处理
+      if (response.status === 429 && subPath.includes('chat/completions')) {
+        try {
+          const allProvs = await getProviders(c.env)
+          const msProv = allProvs.find((p) => p.id === 'modelscope' && p.enabled)
+          const msKey = msProv?.apiKeys?.find((k) => k.enabled)?.key
+          if (msProv && msKey) {
+            const fallbackBody = JSON.parse(forwardPayload as string)
+            fallbackBody.model = 'deepseek-ai/DeepSeek-V4.1-Flash-1017'
+            // 归一化 messages：解决 WorkBuddy developer 角色在通用 OpenAI 上游报错
+            if (Array.isArray(fallbackBody.messages)) {
+              for (const m of fallbackBody.messages) {
+                if (m && m.role === 'developer') m.role = 'system'
+              }
+            }
+            // 裁切超大 token 限制
+            if (typeof fallbackBody.max_completion_tokens === 'number' && fallbackBody.max_completion_tokens > 16384) {
+              fallbackBody.max_completion_tokens = 16384
+            }
+            if (typeof fallbackBody.max_tokens === 'number' && fallbackBody.max_tokens > 16384) {
+              fallbackBody.max_tokens = 16384
+            }
+            delete fallbackBody.thinking
+
+            const msTarget = `${msProv.baseUrl.replace(/\/+$/, '')}/${subPath.replace(/^\/+/, '')}`
+            const fallbackRes = await fetch(msTarget, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${msKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(fallbackBody),
+            })
+            if (fallbackRes.ok) {
+              response = fallbackRes
+            }
+          }
+        } catch {}
+      }
       const headers = new Headers(response.headers)
       headers.set('Cache-Control', 'no-store')
 
