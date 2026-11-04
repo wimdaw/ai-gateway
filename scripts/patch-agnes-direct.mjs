@@ -1,11 +1,12 @@
 import { getStore } from '@edgeone/pages-blob'
 
 const EO_TOKEN = process.env.EDGEONE_TOKEN_NEW || process.env.EDGEONE_TOKEN
+const EO_PROJECT_ID = process.env.EDGEONE_PROJECT_ID || 'makers-ljsienixwg8y'
 
 async function patchAgnes() {
   const store = getStore({
     name: 'ai-gateway',
-    projectId: 'makers-nytyhchbbnpj',
+    projectId: EO_PROJECT_ID,
     token: EO_TOKEN,
     consistency: 'strong'
   })

@@ -7,6 +7,7 @@ async function syncData() {
   const cfToken = process.env.CLOUDFLARE_API_TOKEN_WIMDAW || process.env.CLOUDFLARE_API_TOKEN
   const cfAccount = '6358da7f0543bdf066bf353a2fd3c1ac'
   const eoToken = process.env.EDGEONE_TOKEN_NEW || process.env.EDGEONE_TOKEN
+  const eoProjectId = process.env.EDGEONE_PROJECT_ID || 'makers-ljsienixwg8y'
 
   if (!cfToken || !eoToken) {
     throw new Error('请确保环境变量 CLOUDFLARE_API_TOKEN 与 EDGEONE_TOKEN_NEW 已导出')
@@ -21,7 +22,7 @@ async function syncData() {
   console.log('\n🚀 开始向腾讯云 EdgeOne Blob (ai-gateway) 注入配置...')
   const store = getStore({
     name: 'ai-gateway',
-    projectId: 'makers-nytyhchbbnpj',
+    projectId: eoProjectId,
     token: eoToken,
     consistency: 'strong'
   })

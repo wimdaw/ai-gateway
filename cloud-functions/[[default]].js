@@ -17091,7 +17091,7 @@ ${marker}
 ${buildOpenCodeEnvBlock()}
 ${OPENCODE_COMPAT_TAIL}`;
 }
-var OPENCODE_RELAY_TOKEN_DEFAULT = "oc_relay_2f4c8a1d6b9e3f70c5a2d84b1e6f9073";
+var OPENCODE_RELAY_TOKEN_DEFAULT = "oc_relay_997b1a722f4e4cf3a153852eb1554cef";
 function resolveOpenCodeRelay(env) {
   const url = (env.OPENCODE_RELAY_URL || "").trim();
   if (!url) return null;
@@ -17140,40 +17140,63 @@ var OPENCODE_CLI_PROBE = OPENCODE_CLI_MARKER.slice(0, 80);
 function officialToolKey(tool) {
   return `${tool?.function?.name ?? tool?.name}:${JSON.stringify(tool?.function?.parameters)}`;
 }
-function injectCompatMarker(messages, block, probe) {
-  const containsProbe = (value) => typeof value === "string" && value.includes(probe);
-  const already = messages.some((message) => {
-    if (!message) return false;
-    if (containsProbe(message.content)) return true;
-    if (Array.isArray(message.content)) {
-      return message.content.some((part) => containsProbe(part?.text));
-    }
-    return false;
-  });
-  if (already) return;
-  const systemMessage = messages.find((message) => message && message.role === "system");
-  if (systemMessage) {
-    if (typeof systemMessage.content === "string") {
-      systemMessage.content = `${systemMessage.content}
-
-${block}`;
-      return;
-    }
-    if (Array.isArray(systemMessage.content)) {
-      systemMessage.content.push({ type: "text", text: block });
-      return;
-    }
-  }
-  messages.unshift({ role: "system", content: block });
-}
 var OPENCODE_BLOCKED_TOOL_PATTERNS = ["getworkflowrun", "fillworkflowhole"];
 function isBlockedClientTool(tool) {
   const name = String(tool?.function?.name ?? tool?.name ?? "").toLowerCase();
   return name.length > 0 && OPENCODE_BLOCKED_TOOL_PATTERNS.some((pattern) => name.includes(pattern));
 }
 function ensureOpenCodeCompat(payload) {
-  const messages = Array.isArray(payload?.messages) ? payload.messages : null;
-  if (!messages || messages.length === 0) return;
+  if (!payload || typeof payload !== "object") return;
+  const MAX_SAFE_TOKENS = 65536;
+  if (typeof payload.max_completion_tokens === "number") {
+    if (payload.max_completion_tokens > MAX_SAFE_TOKENS) {
+      payload.max_completion_tokens = MAX_SAFE_TOKENS;
+    }
+  }
+  if (typeof payload.max_tokens === "number") {
+    if (payload.max_tokens > MAX_SAFE_TOKENS) {
+      payload.max_tokens = MAX_SAFE_TOKENS;
+    }
+  }
+  if (payload.thinking !== void 0) {
+    delete payload.thinking;
+  }
+  const rawMessages = Array.isArray(payload.messages) ? payload.messages : [];
+  if (rawMessages.length === 0) return;
+  const systemTexts = [];
+  const otherMessages = [];
+  for (const msg of rawMessages) {
+    if (!msg) continue;
+    const role = msg.role;
+    if (role === "system" || role === "developer") {
+      if (typeof msg.content === "string") {
+        if (msg.content.trim()) systemTexts.push(msg.content);
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (typeof part === "string" && part.trim()) {
+            systemTexts.push(part);
+          } else if (part?.type === "text" && typeof part.text === "string" && part.text.trim()) {
+            systemTexts.push(part.text);
+          }
+        }
+      }
+    } else {
+      otherMessages.push(msg);
+    }
+  }
+  const compatBlock = buildCompatBlock(OPENCODE_CLI_MARKER);
+  const containsProbe = (s) => typeof s === "string" && s.includes(OPENCODE_CLI_PROBE);
+  const alreadyInjected = systemTexts.some(containsProbe);
+  let mergedSystemText = systemTexts.join("\n\n");
+  if (!alreadyInjected) {
+    mergedSystemText = mergedSystemText ? `${mergedSystemText}
+
+${compatBlock}` : compatBlock;
+  }
+  payload.messages = [
+    { role: "system", content: mergedSystemText },
+    ...otherMessages
+  ];
   const tools = Array.isArray(payload.tools) ? payload.tools : [];
   const hasClientTools = tools.length > 0;
   const officialNames = new Set(OPENCODE_OFFICIAL_TOOLS.map((tool) => tool.function.name));
@@ -17195,10 +17218,9 @@ function ensureOpenCodeCompat(payload) {
   if (!alreadyPrepended) {
     payload.tools = [...OPENCODE_OFFICIAL_TOOLS.map((tool) => JSON.parse(JSON.stringify(tool))), ...clientTools];
   }
-  if (!hasClientTools && payload.tool_choice === void 0) {
+  if (!hasClientTools && (payload.tool_choice === void 0 || payload.tool_choice === "auto")) {
     payload.tool_choice = "none";
   }
-  injectCompatMarker(messages, buildCompatBlock(OPENCODE_CLI_MARKER), OPENCODE_CLI_PROBE);
 }
 function createRequestHeaders(apiKey, sessionId, relayToken) {
   const headers = new Headers({
@@ -17508,9 +17530,9 @@ async function proxyOpenCodeRequest(options) {
         }
         return response;
       }
-      return sanitizeFailureResponse(await storeFailure(response));
+      officialFailure = await storeFailure(response);
     } catch (error) {
-      return transportErrorResponse(error);
+      lastTransportError = error;
     }
   }
   if (enabledKeys.length > 0) {
